@@ -7,8 +7,4 @@ services:
     dockerfilePath: ./Dockerfile
     envVars:
       - key: DATA_DIR
-        value: /data
-    disk:
-      name: cplus-xhs-data
-      mountPath: /data
-      sizeGB: 1
+        value: /app/data
