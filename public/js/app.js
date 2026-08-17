@@ -106,6 +106,30 @@ async function go(name) {
   window.scrollTo(0, 0);
 }
 
+function localMats() {
+  try {
+    const raw = localStorage.getItem('cplus_materials');
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function rememberMats(items) {
+  state.materials = items;
+  try { localStorage.setItem('cplus_materials', JSON.stringify(items)); } catch (e) { /* ignore */ }
+}
+
+function mergeById(a, b) {
+  const map = new Map();
+  [...a, ...b].forEach((item) => {
+    if (!item || !item.id) return;
+    if (!map.has(item.id)) map.set(item.id, item);
+  });
+  return [...map.values()].sort((x, y) => String(x.createdAt || '').localeCompare(String(y.createdAt || '')));
+}
+
 async function boot() {
   try {
     const [rules, mats, sch, posts, set] = await Promise.all([
@@ -116,12 +140,22 @@ async function boot() {
       api('/api/settings')
     ]);
     state.rules = rules;
-    state.materials = mats.items || [];
+    const serverMats = mats.items || [];
+    const merged = mergeById(serverMats, localMats());
+    rememberMats(merged);
+    const missing = merged.filter((m) => !serverMats.some((s) => s.id === m.id));
+    if (missing.length) {
+      try {
+        const saved = await post('/api/materials', missing);
+        if (saved.items) rememberMats(mergeById(saved.items, merged));
+      } catch (e) { console.warn('rehydrate materials failed', e); }
+    }
     state.schedules = sch.items || [];
     state.posts = posts.items || [];
     state.settings = set;
     lastSavedAt = rules.updatedAt || null;
   } catch (e) {
+    state.materials = localMats();
     toast(e.message, true);
   }
   const asked = new URLSearchParams(location.search).get('p');
@@ -374,10 +408,17 @@ async function saveMaterial(id) {
   };
   if (!data.title) { toast('先写标题', true); return; }
   try {
-    if (id) await put('/api/materials/' + id, data);
-    else await post('/api/materials', data);
-    const mats = await api('/api/materials');
-    state.materials = mats.items || [];
+    if (id) {
+      const result = await put('/api/materials/' + id, data);
+      const next = result.items || state.materials.map((m) => m.id === id ? { ...m, ...data } : m);
+      rememberMats(next);
+    } else {
+      const result = await post('/api/materials', data);
+      const next = result.items && result.items.length
+        ? mergeById(state.materials, result.items)
+        : (result.item ? mergeById(state.materials, [result.item]) : state.materials);
+      rememberMats(next);
+    }
     closeSheet();
     draw();
     toast(id ? '已更新' : '已添加');
@@ -390,7 +431,7 @@ async function removeMaterial(id) {
   if (!confirm('删除这篇素材？')) return;
   try {
     await del('/api/materials/' + id);
-    state.materials = state.materials.filter((m) => m.id !== id);
+    rememberMats(state.materials.filter((m) => m.id !== id));
     draw();
     toast('已删除');
   } catch (e) {

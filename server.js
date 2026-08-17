@@ -30,8 +30,36 @@ function readData(filename) {
 
 function writeData(filename, data) {
   const filePath = path.join(DATA_DIR, filename);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  const tmp = filePath + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  fs.renameSync(tmp, filePath);
   return data;
+}
+
+function loadList(filename) {
+  try {
+    const data = readData(filename);
+    if (Array.isArray(data)) return { items: data.filter(Boolean) };
+    if (data && Array.isArray(data.items)) return { items: data.items.filter(Boolean) };
+  } catch (e) {
+    console.error('loadList', filename, e.message);
+  }
+  return { items: [] };
+}
+
+const lists = {
+  materials: loadList('materials.json'),
+  schedules: loadList('schedules.json'),
+  posts: loadList('posts.json')
+};
+
+function persistList(name) {
+  writeData(name + '.json', { items: lists[name].items });
+  return lists[name];
+}
+
+function newId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 }
 
 // Initialize data files
@@ -326,95 +354,104 @@ app.get('/api/rules/prompt', (req, res) => {
 
 // --- Materials ---
 app.get('/api/materials', (req, res) => {
-  const data = readData('materials.json');
-  res.json(data);
+  res.json({ items: lists.materials.items });
 });
 
 app.post('/api/materials', (req, res) => {
-  const data = readData('materials.json');
-  const item = {
-    id: Date.now().toString(),
-    ...req.body,
-    createdAt: new Date().toISOString()
-  };
-  data.items.push(item);
-  writeData('materials.json', data);
-  res.json({ success: true, item });
+  const incoming = Array.isArray(req.body) ? req.body : [req.body];
+  const added = [];
+  incoming.forEach((raw) => {
+    if (!raw || !raw.title) return;
+    const exists = raw.id && lists.materials.items.some((i) => i.id === raw.id);
+    if (exists) return;
+    const item = {
+      id: raw.id || newId(),
+      title: raw.title || '',
+      summary: raw.summary || '',
+      keyPoints: raw.keyPoints || '',
+      snippet: raw.snippet || '',
+      createdAt: raw.createdAt || new Date().toISOString()
+    };
+    lists.materials.items.push(item);
+    added.push(item);
+  });
+  persistList('materials');
+  res.json({ success: true, item: added[0] || null, items: lists.materials.items });
 });
 
 app.put('/api/materials/:id', (req, res) => {
-  const data = readData('materials.json');
-  const idx = data.items.findIndex(i => i.id === req.params.id);
+  const idx = lists.materials.items.findIndex(i => i.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
-  data.items[idx] = { ...data.items[idx], ...req.body, id: req.params.id };
-  writeData('materials.json', data);
-  res.json({ success: true, item: data.items[idx] });
+  lists.materials.items[idx] = {
+    ...lists.materials.items[idx],
+    title: req.body.title ?? lists.materials.items[idx].title,
+    summary: req.body.summary ?? lists.materials.items[idx].summary,
+    keyPoints: req.body.keyPoints ?? lists.materials.items[idx].keyPoints,
+    snippet: req.body.snippet ?? lists.materials.items[idx].snippet,
+    id: req.params.id
+  };
+  persistList('materials');
+  res.json({ success: true, item: lists.materials.items[idx], items: lists.materials.items });
 });
 
 app.delete('/api/materials/:id', (req, res) => {
-  const data = readData('materials.json');
-  data.items = data.items.filter(i => i.id !== req.params.id);
-  writeData('materials.json', data);
-  res.json({ success: true });
+  lists.materials.items = lists.materials.items.filter(i => i.id !== req.params.id);
+  persistList('materials');
+  res.json({ success: true, items: lists.materials.items });
 });
 
 // --- Schedules ---
 app.get('/api/schedules', (req, res) => {
-  const data = readData('schedules.json');
-  res.json(data);
+  res.json({ items: lists.schedules.items });
 });
 
 app.post('/api/schedules', (req, res) => {
-  const data = readData('schedules.json');
   const item = {
-    id: Date.now().toString(),
-    ...req.body,
+    id: newId(),
+    name: req.body.name || '',
+    content: req.body.content || '',
     createdAt: new Date().toISOString()
   };
-  data.items.push(item);
-  writeData('schedules.json', data);
-  res.json({ success: true, item });
+  lists.schedules.items.push(item);
+  persistList('schedules');
+  res.json({ success: true, item, items: lists.schedules.items });
 });
 
 app.delete('/api/schedules/:id', (req, res) => {
-  const data = readData('schedules.json');
-  data.items = data.items.filter(i => i.id !== req.params.id);
-  writeData('schedules.json', data);
-  res.json({ success: true });
+  lists.schedules.items = lists.schedules.items.filter(i => i.id !== req.params.id);
+  persistList('schedules');
+  res.json({ success: true, items: lists.schedules.items });
 });
 
 // --- Posts ---
 app.get('/api/posts', (req, res) => {
-  const data = readData('posts.json');
-  res.json(data);
+  res.json({ items: lists.posts.items });
 });
 
 app.post('/api/posts', (req, res) => {
-  const data = readData('posts.json');
   const item = {
-    id: Date.now().toString(),
-    ...req.body,
+    id: newId(),
+    title: req.body.title || '',
+    content: req.body.content || '',
     createdAt: new Date().toISOString()
   };
-  data.items.push(item);
-  writeData('posts.json', data);
-  res.json({ success: true, item });
+  lists.posts.items.push(item);
+  persistList('posts');
+  res.json({ success: true, item, items: lists.posts.items });
 });
 
 app.put('/api/posts/:id', (req, res) => {
-  const data = readData('posts.json');
-  const idx = data.items.findIndex(i => i.id === req.params.id);
+  const idx = lists.posts.items.findIndex(i => i.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
-  data.items[idx] = { ...data.items[idx], ...req.body, id: req.params.id };
-  writeData('posts.json', data);
-  res.json({ success: true, item: data.items[idx] });
+  lists.posts.items[idx] = { ...lists.posts.items[idx], ...req.body, id: req.params.id };
+  persistList('posts');
+  res.json({ success: true, item: lists.posts.items[idx], items: lists.posts.items });
 });
 
 app.delete('/api/posts/:id', (req, res) => {
-  const data = readData('posts.json');
-  data.items = data.items.filter(i => i.id !== req.params.id);
-  writeData('posts.json', data);
-  res.json({ success: true });
+  lists.posts.items = lists.posts.items.filter(i => i.id !== req.params.id);
+  persistList('posts');
+  res.json({ success: true, items: lists.posts.items });
 });
 
 // --- AI Generation: Schedule ---
@@ -560,9 +597,9 @@ ${feedback || ''}
 app.get('/api/export', (req, res) => {
   const data = {
     rules: readData('rules.json'),
-    materials: readData('materials.json'),
-    schedules: readData('schedules.json'),
-    posts: readData('posts.json'),
+    materials: { items: lists.materials.items },
+    schedules: { items: lists.schedules.items },
+    posts: { items: lists.posts.items },
     settings: { ...readData('settings.json'), apiKey: '***' },
     exportedAt: new Date().toISOString()
   };
@@ -573,9 +610,21 @@ app.get('/api/export', (req, res) => {
 app.post('/api/import', (req, res) => {
   const { rules, materials, schedules, posts } = req.body;
   if (rules) writeData('rules.json', rules);
-  if (materials) writeData('materials.json', materials);
-  if (schedules) writeData('schedules.json', schedules);
-  if (posts) writeData('posts.json', posts);
+  if (materials) {
+    const items = Array.isArray(materials) ? materials : (materials.items || []);
+    lists.materials.items = items;
+    persistList('materials');
+  }
+  if (schedules) {
+    const items = Array.isArray(schedules) ? schedules : (schedules.items || []);
+    lists.schedules.items = items;
+    persistList('schedules');
+  }
+  if (posts) {
+    const items = Array.isArray(posts) ? posts : (posts.items || []);
+    lists.posts.items = items;
+    persistList('posts');
+  }
   res.json({ success: true });
 });
 
