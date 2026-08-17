@@ -579,8 +579,13 @@ app.post('/api/import', (req, res) => {
   res.json({ success: true });
 });
 
-// Serve index.html for all other routes
-app.get('*', (req, res) => {
+app.get('/healthz', (req, res) => {
+  res.status(200).type('text').send('ok');
+});
+
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  if (req.path.startsWith('/api')) return next();
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
