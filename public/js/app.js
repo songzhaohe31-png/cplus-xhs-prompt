@@ -679,7 +679,7 @@ function viewArchive() {
                 <div class="meta">${whenFull(x.createdAt)}</div>
               </div>
               <div class="actions">
-                <button class="btn ghost small" onclick="openText(${jsStr(x.name || '排期')}, ${jsStr(x.content)})">看</button>
+                <button class="btn ghost small" onclick="event.stopPropagation(); viewSaved('schedules','${x.id}')">看</button>
                 <button class="btn quiet small" onclick="removeSchedule('${x.id}')">删</button>
               </div>
             </div>
@@ -700,7 +700,7 @@ function viewArchive() {
                 <div class="meta">${whenFull(x.createdAt)}</div>
               </div>
               <div class="actions">
-                <button class="btn ghost small" onclick="openText(${jsStr(x.title || '稿件')}, ${jsStr(x.content)})">看</button>
+                <button class="btn ghost small" onclick="event.stopPropagation(); viewSaved('posts','${x.id}')">看</button>
                 <button class="btn quiet small" onclick="removePost('${x.id}')">删</button>
               </div>
             </div>
@@ -733,19 +733,32 @@ function jsStr(s) {
   return JSON.stringify(s || '').replace(/</g, '\\u003c');
 }
 
+function viewSaved(kind, id) {
+  const item = (state[kind] || []).find((x) => String(x.id) === String(id));
+  if (!item) { toast('找不到这条记录', true); return; }
+  const title = item.name || item.title || '详情';
+  openText(title, item.content || '');
+}
+
 function openText(title, content) {
-  document.getElementById('sheet').classList.remove('hidden');
-  document.getElementById('sheet').innerHTML = `
+  const sheet = document.getElementById('sheet');
+  sheet.classList.remove('hidden');
+  sheet.onclick = null;
+  sheet.innerHTML = `
     <div class="sheet-card" onclick="event.stopPropagation()">
       <h2>${esc(title)}</h2>
-      <pre style="white-space:pre-wrap;font-family:var(--sans);font-size:14px;line-height:1.7">${esc(content)}</pre>
+      <pre style="white-space:pre-wrap;font-family:var(--sans);font-size:14px;line-height:1.7">${esc(content || '（没有内容）')}</pre>
       <div class="actions" style="margin-top:18px">
-        <button class="btn" onclick='copy(${jsStr(content)}); toast("已复制")'>复制</button>
-        <button class="btn ghost" onclick="closeSheet()">关闭</button>
+        <button class="btn" type="button" id="copySavedBtn">复制</button>
+        <button class="btn ghost" type="button" onclick="closeSheet()">关闭</button>
       </div>
     </div>
   `;
-  document.getElementById('sheet').onclick = closeSheet;
+  const copyBtn = document.getElementById('copySavedBtn');
+  if (copyBtn) {
+    copyBtn.onclick = () => { copy(content || ''); toast('已复制'); };
+  }
+  setTimeout(() => { sheet.onclick = closeSheet; }, 0);
 }
 
 async function removeSchedule(id) {
