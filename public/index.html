@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CPLUS 小红书 Prompt</title>
+  <link rel="stylesheet" href="/css/style.css?v=6">
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <div class="brand" onclick="go('prompt')">
+        <img class="logo" src="/img/cplus-mark.png" alt="CPLUS GROUP">
+        <div class="brand-text">
+          <strong>CPLUS</strong>
+          <span>小红书 Prompt</span>
+        </div>
+      </div>
+      <nav class="steps" id="steps">
+        <button type="button" data-page="rules" onclick="go('rules')">规则</button>
+        <button type="button" data-page="materials" onclick="go('materials')">素材</button>
+        <button type="button" data-page="prompt" onclick="go('prompt')">做 Prompt</button>
+        <button type="button" data-page="archive" onclick="go('archive')">存档</button>
+      </nav>
+    </header>
+    <main class="stage" id="stage"></main>
+  </div>
+
+  <div class="savebar hidden" id="savebar">
+    <span id="saveState">规则已保存</span>
+    <button type="button" class="btn" onclick="saveRules(true)">保存规则</button>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <div class="veil hidden" id="veil"><p id="veilText">处理中</p></div>
+  <div class="sheet hidden" id="sheet"></div>
+
+  <div id="pdfMount" class="pdf-mount" aria-hidden="true"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="/js/app.js?v=7"></script>
+</body>
+</html>

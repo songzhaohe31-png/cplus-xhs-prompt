@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: cplus-xhs-prompt
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATA_DIR
+        value: /data
+    disk:
+      name: cplus-xhs-data
+      mountPath: /data
+      sizeGB: 1

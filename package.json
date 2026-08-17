@@ -1,0 +1,13 @@
+{
+  "name": "xhs-content-agent",
+  "version": "1.0.0",
+  "description": "AI Agent for Xiaohongshu content planning & generation from WeChat Official Account articles",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2"
+  }
+}
