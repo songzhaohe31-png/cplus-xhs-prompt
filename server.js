@@ -50,8 +50,12 @@ function loadList(filename) {
 const lists = {
   materials: loadList('materials.json'),
   schedules: loadList('schedules.json'),
-  posts: loadList('posts.json')
+  posts: loadList('posts.json'),
+  feed: loadList('feed.json')
 };
+
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 function persistList(name) {
   writeData(name + '.json', { items: lists[name].items });
@@ -76,7 +80,7 @@ const DEFAULT_RULES = {
   imageSuggestions: '2-3个具体画面方向，适合小红书图文，方便 Xixi 按固定海报模板落版；写清主标题、副标题、2-4个信息块，不要笼统说「做一张专业封面」',
   tagRule: '每篇6-8个标签：固定可带 #香港公司 #企业合规；再加2个大流量词 + 4-6个垂直细分词（如 #SCR备案 #KYC #MSO牌照 #公司秘书）',
   prohibitions: '公众号式长篇铺垫、学术式长句、生硬说教、营销感过重话术、编造罚款金额或牌照案例、把 CPLUS 写成软广、恐吓式监管话术',
-  materialConstraint: '输入素材来自 CPLUS GROUP LIMITED (HK) 公众号文章。严禁直接复制原文段落；只萃取核心论点、案例、数据后重新解构重组；剔除铺垫、客套、文末商务推广。',
+  materialConstraint: '优先模仿已喂入的真实小红书旧帖语气和版式。如另有公众号摘录，只萃取论点后打散重写，禁止整段搬原文。',
   outputFormat: '封面标题 | 笔记正文 | 配图思路建议 | 标签组',
   iterations: [],
   updatedAt: new Date().toISOString()
@@ -243,6 +247,110 @@ ${snippetText}
 4、事实、案例、数据忠于原始素材，不编造信息；
 5、配图思路要写到 Xixi 能按固定海报模板落版：主标题、副标题、2-4个信息块；
 6、输出时每篇笔记之间用 ———— 分割隔开，方便复制拆分。`;
+}
+
+function stripDataUrl(item) {
+  const images = (item.images || []).map((img) => ({
+    name: img.name,
+    mime: img.mime || 'image/jpeg',
+    url: img.url
+  }));
+  return { ...item, images };
+}
+
+function saveBase64Image(dir, index, img) {
+  const raw = String(img.data || img.dataUrl || '');
+  const comma = raw.indexOf(',');
+  const payload = comma >= 0 ? raw.slice(comma + 1) : raw;
+  if (!payload) return null;
+  const mime = img.mime || (raw.includes('image/png') ? 'image/png' : 'image/jpeg');
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+  const name = String(index) + '.' + ext;
+  const buf = Buffer.from(payload, 'base64');
+  if (!buf.length || buf.length > 6 * 1024 * 1024) return null;
+  fs.writeFileSync(path.join(dir, name), buf);
+  return { name, mime, url: '' };
+}
+
+function removeUploadDir(id) {
+  const dir = path.join(UPLOAD_DIR, id);
+  if (!fs.existsSync(dir)) return;
+  fs.readdirSync(dir).forEach((name) => fs.unlinkSync(path.join(dir, name)));
+  fs.rmdirSync(dir);
+}
+
+function withImageUrls(item) {
+  const images = (item.images || []).map((img) => ({
+    ...img,
+    url: '/api/uploads/' + item.id + '/' + img.name
+  }));
+  return { ...item, images };
+}
+
+function analyzeFeed(items) {
+  const caps = (items || []).map((i) => i.caption || '').filter(Boolean);
+  const tagCount = {};
+  caps.forEach((c) => {
+    (c.match(/#[^\s#]+/g) || []).forEach((t) => {
+      tagCount[t] = (tagCount[t] || 0) + 1;
+    });
+  });
+  const tags = Object.entries(tagCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([tag, n]) => ({ tag, n }));
+  const hooks = caps.map((c) => c.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 2).join(' ｜ ')).filter(Boolean).slice(0, 10);
+  const ratings = { good: 0, ok: 0, bad: 0 };
+  (items || []).forEach((i) => {
+    if (ratings[i.rating] != null) ratings[i.rating] += 1;
+  });
+  const avg = caps.length ? Math.round(caps.reduce((n, c) => n + c.length, 0) / caps.length) : 0;
+  return { count: items.length, captionCount: caps.length, avgChars: avg, tags, hooks, ratings };
+}
+
+function buildProduceBrief(rules, feedItems, command) {
+  const rulesPrompt = buildRulesPrompt(rules || {});
+  const samples = (feedItems || []).slice(-20).reverse().map((item, i) => {
+    const mark = item.rating === 'good' ? '数据较好' : item.rating === 'bad' ? '数据较差' : item.rating === 'ok' ? '数据一般' : '未标数据';
+    const note = item.note ? `\n备注：${item.note}` : '';
+    return `### 真实旧帖 ${i + 1}（${mark}）\n${item.caption || '（无文案，只有海报）'}${note}`;
+  }).join('\n\n');
+  const style = analyzeFeed(feedItems);
+  const tagLine = style.tags.length ? style.tags.map((t) => `${t.tag}×${t.n}`).join(' ') : '（还没有标签样本）';
+
+  return `${rulesPrompt}
+
+---
+
+你是 CPLUS GROUP LIMITED (HK) 的小红书运营助理。下面是这个账号已经发过的真实文案。先模仿它们的语气、标题习惯、分段和标签，再完成用户这一句话的任务。
+不要输出 prompt，不要解释过程。直接输出可发布的选题排期表和完整图文成稿。
+
+## 用户指令
+${command || '出下周 4 篇小红书图文。'}
+
+## 已学会的风格（从真实旧帖统计）
+- 已喂 ${style.count} 条，其中 ${style.captionCount} 条有文案
+- 文案平均约 ${style.avgChars} 字
+- 常用标签：${tagLine}
+- 数据较好 ${style.ratings.good} / 一般 ${style.ratings.ok} / 较差 ${style.ratings.bad}
+
+## 真实旧帖文案（按时间，最多 20 条）
+${samples || '（还没有喂帖。按账号规则写，不要编造客户案例和罚款数字。）'}
+
+## 必须这样输出
+先给选题排期表：
+
+| 周 | 序号 | 封面标题 | 类型 | 一句话梗概 | 配图张数 |
+
+然后输出全部成稿。每篇之间用 ———— 分隔，模板如下：
+
+【封面标题】：
+【笔记正文】：
+【配图思路】：
+1、封面：
+2、内页：
+【标签】：
+【待核对】：`;
 }
 
 function buildIteratePrompt(rules, feedback, goodPosts, badPosts) {
@@ -593,6 +701,103 @@ ${feedback || ''}
   }
 });
 
+// --- Feed: real XHS posters + captions ---
+app.get('/api/feed', (req, res) => {
+  res.json({
+    items: lists.feed.items.map(withImageUrls),
+    style: analyzeFeed(lists.feed.items)
+  });
+});
+
+app.post('/api/feed', (req, res) => {
+  const incoming = Array.isArray(req.body) ? req.body : [req.body];
+  const added = [];
+  incoming.forEach((raw) => {
+    if (!raw) return;
+    if (raw.id && lists.feed.items.some((i) => i.id === raw.id)) return;
+    const hasCaption = !!(raw.caption && String(raw.caption).trim());
+    const hasImages = Array.isArray(raw.images) && raw.images.length;
+    if (!hasCaption && !hasImages) return;
+    const id = raw.id || newId();
+    const dir = path.join(UPLOAD_DIR, id);
+    fs.mkdirSync(dir, { recursive: true });
+    const images = [];
+    (raw.images || []).slice(0, 8).forEach((img, i) => {
+      const saved = saveBase64Image(dir, i, img || {});
+      if (saved) {
+        saved.url = '/api/uploads/' + id + '/' + saved.name;
+        images.push(saved);
+      }
+    });
+    const item = {
+      id,
+      caption: raw.caption || '',
+      rating: ['good', 'ok', 'bad'].includes(raw.rating) ? raw.rating : '',
+      note: raw.note || '',
+      postedAt: raw.postedAt || '',
+      createdAt: raw.createdAt || new Date().toISOString(),
+      images: images.map((img) => ({ name: img.name, mime: img.mime, url: img.url }))
+    };
+    lists.feed.items.push(item);
+    added.push(withImageUrls(item));
+  });
+  persistList('feed');
+  res.json({
+    success: true,
+    item: added[0] || null,
+    items: lists.feed.items.map(withImageUrls),
+    style: analyzeFeed(lists.feed.items)
+  });
+});
+
+app.put('/api/feed/:id', (req, res) => {
+  const idx = lists.feed.items.findIndex((i) => i.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Not found' });
+  const cur = lists.feed.items[idx];
+  const next = {
+    ...cur,
+    caption: req.body.caption != null ? req.body.caption : cur.caption,
+    rating: req.body.rating != null ? req.body.rating : cur.rating,
+    note: req.body.note != null ? req.body.note : cur.note,
+    postedAt: req.body.postedAt != null ? req.body.postedAt : cur.postedAt,
+    id: req.params.id
+  };
+  lists.feed.items[idx] = stripDataUrl(next);
+  persistList('feed');
+  res.json({ success: true, item: withImageUrls(lists.feed.items[idx]), items: lists.feed.items.map(withImageUrls) });
+});
+
+app.delete('/api/feed/:id', (req, res) => {
+  lists.feed.items = lists.feed.items.filter((i) => i.id !== req.params.id);
+  persistList('feed');
+  removeUploadDir(req.params.id);
+  res.json({ success: true, items: lists.feed.items.map(withImageUrls), style: analyzeFeed(lists.feed.items) });
+});
+
+app.get('/api/uploads/:id/:file', (req, res) => {
+  const id = path.basename(req.params.id);
+  const file = path.basename(req.params.file);
+  const abs = path.join(UPLOAD_DIR, id, file);
+  if (!abs.startsWith(UPLOAD_DIR)) return res.status(400).end();
+  if (!fs.existsSync(abs)) return res.status(404).end();
+  res.sendFile(abs);
+});
+
+app.post('/api/produce', (req, res) => {
+  const rules = readData('rules.json');
+  const command = (req.body && req.body.command) || '';
+  if (!String(command).trim()) {
+    return res.status(400).json({ error: '先说一句要出什么' });
+  }
+  const brief = buildProduceBrief(rules, lists.feed.items, command.trim());
+  res.json({
+    success: true,
+    brief,
+    style: analyzeFeed(lists.feed.items),
+    feedCount: lists.feed.items.length
+  });
+});
+
 // --- Export all data ---
 app.get('/api/export', (req, res) => {
   const data = {
@@ -600,6 +805,7 @@ app.get('/api/export', (req, res) => {
     materials: { items: lists.materials.items },
     schedules: { items: lists.schedules.items },
     posts: { items: lists.posts.items },
+    feed: { items: lists.feed.items.map(stripDataUrl) },
     settings: { ...readData('settings.json'), apiKey: '***' },
     exportedAt: new Date().toISOString()
   };
@@ -608,7 +814,7 @@ app.get('/api/export', (req, res) => {
 
 // --- Import data ---
 app.post('/api/import', (req, res) => {
-  const { rules, materials, schedules, posts } = req.body;
+  const { rules, materials, schedules, posts, feed } = req.body;
   if (rules) writeData('rules.json', rules);
   if (materials) {
     const items = Array.isArray(materials) ? materials : (materials.items || []);
@@ -624,6 +830,11 @@ app.post('/api/import', (req, res) => {
     const items = Array.isArray(posts) ? posts : (posts.items || []);
     lists.posts.items = items;
     persistList('posts');
+  }
+  if (feed) {
+    const items = Array.isArray(feed) ? feed : (feed.items || []);
+    lists.feed.items = items.map(stripDataUrl);
+    persistList('feed');
   }
   res.json({ success: true });
 });

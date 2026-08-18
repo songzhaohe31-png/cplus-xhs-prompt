@@ -3,23 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CPLUS 小红书 Prompt</title>
-  <link rel="stylesheet" href="/css/style.css?v=6">
+  <title>CPLUS 小红书助理</title>
+  <link rel="stylesheet" href="/css/style.css?v=10">
 </head>
 <body>
   <div class="shell">
     <header class="top">
-      <div class="brand" onclick="go('prompt')">
+      <div class="brand" onclick="go('produce')">
         <img class="logo" src="/img/cplus-mark.png" alt="CPLUS GROUP">
         <div class="brand-text">
           <strong>CPLUS</strong>
-          <span>小红书 Prompt</span>
+          <span>小红书助理</span>
         </div>
       </div>
       <nav class="steps" id="steps">
+        <button type="button" data-page="produce" onclick="go('produce')">出稿</button>
+        <button type="button" data-page="feed" onclick="go('feed')">喂帖</button>
+        <button type="button" data-page="style" onclick="go('style')">风格</button>
         <button type="button" data-page="rules" onclick="go('rules')">规则</button>
-        <button type="button" data-page="materials" onclick="go('materials')">素材</button>
-        <button type="button" data-page="prompt" onclick="go('prompt')">做 Prompt</button>
         <button type="button" data-page="archive" onclick="go('archive')">存档</button>
       </nav>
     </header>
@@ -39,6 +40,6 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="/js/app.js?v=9"></script>
+  <script src="/js/app.js?v=10"></script>
 </body>
 </html>

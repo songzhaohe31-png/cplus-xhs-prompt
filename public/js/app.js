@@ -3,15 +3,26 @@ const state = {
   materials: [],
   schedules: [],
   posts: [],
+  feed: [],
+  style: { count: 0, captionCount: 0, avgChars: 0, tags: [], hooks: [], ratings: { good: 0, ok: 0, bad: 0 } },
   settings: null
 };
 
-let page = 'prompt';
-let promptKind = 'schedule';
-let lastPrompt = '';
+let page = 'produce';
 let rulesDirty = false;
 let saveTimer = null;
 let lastSavedAt = null;
+let lastBrief = '';
+let lastCommand = '';
+let lastResult = '';
+let previewIdb = null;
+
+const composer = {
+  images: [],
+  caption: '',
+  rating: '',
+  note: ''
+};
 
 const RULE_FIELDS = [
   'accountPosition', 'targetAudience', 'persona', 'coverTitleStyle', 'coverTitleMaxLength',
@@ -91,7 +102,156 @@ function paintSavebar() {
   else label.textContent = '规则已保存';
 }
 
+function localFeed() {
+  try {
+    const raw = localStorage.getItem('cplus_feed');
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function rememberFeed(items) {
+  state.feed = items;
+  try {
+    const slim = items.map((item) => ({
+      ...item,
+      images: (item.images || []).map((img, i) => ({
+        name: img.name || String(i),
+        mime: img.mime || 'image/jpeg',
+        url: img.url || '',
+        preview: img.preview || ''
+      }))
+    }));
+    localStorage.setItem('cplus_feed', JSON.stringify(slim));
+  } catch (e) {
+    try {
+      const slimmer = items.map((item) => ({
+        ...item,
+        images: (item.images || []).map((img) => ({
+          name: img.name,
+          mime: img.mime,
+          url: img.url || ''
+        }))
+      }));
+      localStorage.setItem('cplus_feed', JSON.stringify(slimmer));
+    } catch (err) { /* ignore quota */ }
+  }
+}
+
+function mergeById(a, b) {
+  const map = new Map();
+  [...a, ...b].forEach((item) => {
+    if (!item || !item.id) return;
+    const prev = map.get(item.id) || {};
+    map.set(item.id, {
+      ...prev,
+      ...item,
+      images: (item.images && item.images.length) ? item.images : (prev.images || [])
+    });
+  });
+  return [...map.values()].sort((x, y) => String(x.createdAt || '').localeCompare(String(y.createdAt || '')));
+}
+
+function openIdb() {
+  if (previewIdb) return previewIdb;
+  previewIdb = new Promise((resolve, reject) => {
+    const req = indexedDB.open('cplus-xhs', 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('previews')) db.createObjectStore('previews');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return previewIdb;
+}
+
+async function idbSet(key, value) {
+  try {
+    const db = await openIdb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('previews', 'readwrite');
+      tx.objectStore('previews').put(value, key);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) { /* ignore */ }
+}
+
+async function idbGet(key) {
+  try {
+    const db = await openIdb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction('previews', 'readonly');
+      const req = tx.objectStore('previews').get(key);
+      req.onsuccess = () => resolve(req.result || '');
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    return '';
+  }
+}
+
+async function idbDel(key) {
+  try {
+    const db = await openIdb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('previews', 'readwrite');
+      tx.objectStore('previews').delete(key);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) { /* ignore */ }
+}
+
+function coverSrc(item, index) {
+  const img = (item.images || [])[index || 0];
+  if (!img) return '';
+  return img.preview || img.dataUrl || img.url || '';
+}
+
+async function hydratePreviews(items) {
+  const next = [];
+  for (const item of items) {
+    const images = [];
+    for (let i = 0; i < (item.images || []).length; i++) {
+      const img = item.images[i];
+      let preview = img.preview || img.dataUrl || '';
+      if (!preview) preview = await idbGet(item.id + ':' + i);
+      images.push({ ...img, preview });
+    }
+    next.push({ ...item, images });
+  }
+  return next;
+}
+
+function compressFile(file, maxW = 1400, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxW / img.width);
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('图片无法读取'));
+    };
+    img.src = url;
+  });
+}
+
 async function go(name) {
+  if (page === 'feed') stashComposer();
   if (page === 'rules' && name !== 'rules' && rulesDirty) {
     await saveRules(false);
   }
@@ -106,62 +266,68 @@ async function go(name) {
   window.scrollTo(0, 0);
 }
 
-function localMats() {
-  try {
-    const raw = localStorage.getItem('cplus_materials');
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function rememberMats(items) {
-  state.materials = items;
-  try { localStorage.setItem('cplus_materials', JSON.stringify(items)); } catch (e) { /* ignore */ }
-}
-
-function mergeById(a, b) {
-  const map = new Map();
-  [...a, ...b].forEach((item) => {
-    if (!item || !item.id) return;
-    if (!map.has(item.id)) map.set(item.id, item);
-  });
-  return [...map.values()].sort((x, y) => String(x.createdAt || '').localeCompare(String(y.createdAt || '')));
-}
-
 async function boot() {
   try {
-    const [rules, mats, sch, posts, set] = await Promise.all([
+    const [rules, mats, sch, posts, set, feed] = await Promise.all([
       api('/api/rules'),
       api('/api/materials'),
       api('/api/schedules'),
       api('/api/posts'),
-      api('/api/settings')
+      api('/api/settings'),
+      api('/api/feed')
     ]);
     state.rules = rules;
-    const serverMats = mats.items || [];
-    const merged = mergeById(serverMats, localMats());
-    rememberMats(merged);
-    const missing = merged.filter((m) => !serverMats.some((s) => s.id === m.id));
-    if (missing.length) {
-      try {
-        const saved = await post('/api/materials', missing);
-        if (saved.items) rememberMats(mergeById(saved.items, merged));
-      } catch (e) { console.warn('rehydrate materials failed', e); }
-    }
+    state.materials = mats.items || [];
     state.schedules = sch.items || [];
     state.posts = posts.items || [];
     state.settings = set;
     lastSavedAt = rules.updatedAt || null;
+    const serverFeed = feed.items || [];
+    const merged = await hydratePreviews(mergeById(serverFeed, localFeed()));
+    rememberFeed(merged);
+    state.style = feed.style || analyzeLocal(merged);
+    const missing = merged.filter((m) => !serverFeed.some((s) => s.id === m.id));
+    if (missing.length) {
+      try {
+        const payload = missing.map((item) => ({
+          ...item,
+          images: (item.images || []).map((img) => ({
+            name: img.name,
+            mime: img.mime,
+            dataUrl: img.preview || ''
+          }))
+        }));
+        const saved = await post('/api/feed', payload);
+        if (saved.items) rememberFeed(await hydratePreviews(mergeById(saved.items, merged)));
+        if (saved.style) state.style = saved.style;
+      } catch (e) { console.warn('rehydrate feed failed', e); }
+    }
   } catch (e) {
-    state.materials = localMats();
+    const local = await hydratePreviews(localFeed());
+    rememberFeed(local);
+    state.style = analyzeLocal(local);
     toast(e.message, true);
   }
   const asked = new URLSearchParams(location.search).get('p');
-  const allowed = ['rules', 'materials', 'prompt', 'archive'];
-  page = allowed.includes(asked) ? asked : 'rules';
+  const allowed = ['produce', 'feed', 'style', 'rules', 'archive'];
+  page = allowed.includes(asked) ? asked : 'produce';
   go(page);
+}
+
+function analyzeLocal(items) {
+  const caps = (items || []).map((i) => i.caption || '').filter(Boolean);
+  const tagCount = {};
+  caps.forEach((c) => {
+    (c.match(/#[^\s#]+/g) || []).forEach((t) => {
+      tagCount[t] = (tagCount[t] || 0) + 1;
+    });
+  });
+  const tags = Object.entries(tagCount).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([tag, n]) => ({ tag, n }));
+  const hooks = caps.map((c) => c.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 2).join(' ｜ ')).filter(Boolean).slice(0, 10);
+  const ratings = { good: 0, ok: 0, bad: 0 };
+  (items || []).forEach((i) => { if (ratings[i.rating] != null) ratings[i.rating] += 1; });
+  const avg = caps.length ? Math.round(caps.reduce((n, c) => n + c.length, 0) / caps.length) : 0;
+  return { count: items.length, captionCount: caps.length, avgChars: avg, tags, hooks, ratings };
 }
 
 function val(id) {
@@ -181,11 +347,363 @@ function draw() {
     watchRules();
     showSavebar(true);
     paintSavebar();
-  } else {
-    showSavebar(false);
-    if (page === 'materials') root.innerHTML = viewMaterials();
-    else if (page === 'prompt') root.innerHTML = viewPrompt();
-    else root.innerHTML = viewArchive();
+    return;
+  }
+  showSavebar(false);
+  if (page === 'produce') root.innerHTML = viewProduce();
+  else if (page === 'feed') {
+    root.innerHTML = viewFeed();
+    bindDrop();
+  } else if (page === 'style') root.innerHTML = viewStyle();
+  else root.innerHTML = viewArchive();
+}
+
+function viewProduce() {
+  const n = state.feed.length;
+  const recent = [...state.feed].reverse().slice(0, 8);
+  return `
+    <h1>说一句，出排期和成稿</h1>
+    <p class="lead">先在「喂帖」把小红书海报和 caption 存进来。这里只说一句话，助理会带上已喂的真实旧帖去写。</p>
+    <div class="stat-row">
+      <span class="pill hot">已喂 ${n} 条真实帖</span>
+      <span class="pill">有文案 ${state.style.captionCount || 0}</span>
+      <span class="pill">较好 ${state.style.ratings?.good || 0} · 一般 ${state.style.ratings?.ok || 0} · 较差 ${state.style.ratings?.bad || 0}</span>
+    </div>
+    <section class="command">
+      <div class="field">
+        <label>这一次要出什么</label>
+        <textarea id="cmd" rows="3" placeholder="例如：出下周 4 篇，围绕香港公司年审和开户">${esc(lastCommand)}</textarea>
+      </div>
+      ${recent.length ? `
+        <label>可一并丢给 AI 的参考海报</label>
+        <div class="cover-strip">
+          ${recent.map((item) => {
+            const src = coverSrc(item, 0);
+            return src
+              ? `<div class="ph"><img src="${esc(src)}" alt=""></div>`
+              : `<div class="ph"></div>`;
+          }).join('')}
+        </div>
+        <p class="hint">电脑上可以把这几张封面一起拖进 Grok / 豆包 / Kimi，海报风格会更像。</p>
+      ` : `<p class="hint">还没有旧帖。先去喂 10–20 条，出稿才会像你们自己的号。</p>`}
+      <div class="actions">
+        <button class="btn" onclick="produceNow()">出稿</button>
+        <button class="btn ghost" onclick="go('feed')">去喂帖</button>
+      </div>
+    </section>
+    ${lastBrief ? renderProduceResult() : ''}
+  `;
+}
+
+function renderProduceResult() {
+  return `
+    <section class="result-area">
+      <div class="brief-box">
+        <div class="prompt-head">
+          <h2>已复制给 AI 的任务</h2>
+          <button class="btn ghost small" onclick="copy(lastBrief); toast('已复制')">再复制</button>
+        </div>
+        <p class="hint">不接付费 API。打开你们已经在用的 Grok / 豆包 / Kimi，粘贴即可出排期和成稿。海报可从上面一起拖过去。</p>
+        <pre>${esc(lastBrief)}</pre>
+      </div>
+      <div class="field" style="margin-top:18px">
+        <label>把 AI 出的排期和成稿贴回来</label>
+        <textarea id="pasteBack" rows="10" placeholder="整段贴进来，存进「存档」">${esc(lastResult)}</textarea>
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="saveProduceResult()">保存成稿</button>
+        <button class="btn ghost" onclick="exportResultPdf()">导出 PDF</button>
+      </div>
+    </section>
+  `;
+}
+
+async function produceNow() {
+  const command = val('cmd') || lastCommand;
+  if (!command) { toast('先说一句要出什么', true); return; }
+  lastCommand = command;
+  lastResult = '';
+  busy(true, '在整理已喂的旧帖');
+  try {
+    const res = await post('/api/produce', { command });
+    lastBrief = res.brief;
+    copy(lastBrief);
+    if (res.style) state.style = res.style;
+    draw();
+    toast(res.feedCount ? `已复制，带上了 ${res.feedCount} 条旧帖` : '已复制。建议先喂一些旧帖');
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    busy(false);
+  }
+}
+
+async function saveProduceResult() {
+  const content = val('pasteBack');
+  if (!content) { toast('先把结果贴进来', true); return; }
+  lastResult = content;
+  try {
+    const parts = content.split(/—{2,}|-{4,}/).map((p) => p.trim()).filter((p) => p.length > 10);
+    const chunks = parts.length > 1 ? parts : [content];
+    const hasTable = /\|/.test(content) && /封面标题/.test(content);
+    if (hasTable) {
+      await post('/api/schedules', { name: lastCommand || ('排期 ' + whenFull(new Date().toISOString())), content });
+      const sch = await api('/api/schedules');
+      state.schedules = sch.items || [];
+    }
+    for (const p of chunks) {
+      const m = p.match(/【封面标题】[：:](.+)/);
+      await post('/api/posts', { title: m ? m[1].trim() : (lastCommand || '稿件'), content: p });
+    }
+    const data = await api('/api/posts');
+    state.posts = data.items || [];
+    toast('已存进存档');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function viewFeed() {
+  return `
+    <h1>喂真实旧帖</h1>
+    <p class="lead">在小红书里把海报下载下来，caption 复制过来。一张封面即可，内页有就一起丢。标一下数据好坏，助理才知道该学哪一类。</p>
+    <section class="panel">
+      <div class="field">
+        <label>海报 / 内页</label>
+        <div class="drop" id="drop">点击、拖入，或直接粘贴截图</div>
+        <input type="file" id="filePick" accept="image/*" multiple hidden>
+        <div class="thumbs" id="thumbs">${renderComposerThumbs()}</div>
+        <p class="hint">手机可直接从相册选图。一次最多 8 张。</p>
+      </div>
+      <div class="field">
+        <label>Caption 原文</label>
+        <textarea id="f_caption" rows="8" placeholder="从小红书复制完整文案，不要先改写">${esc(composer.caption)}</textarea>
+      </div>
+      <div class="field">
+        <label>这条数据怎么样</label>
+        <div class="chips">
+          ${[['good', '较好'], ['ok', '一般'], ['bad', '较差'], ['', '不标']].map(([k, lab]) => `
+            <button type="button" class="chip ${composer.rating === k ? 'on' : ''}" onclick="setRating('${k}')">${lab}</button>
+          `).join('')}
+        </div>
+      </div>
+      <div class="field">
+        <label>备注（可选）</label>
+        <input type="text" id="f_note" value="${esc(composer.note)}" placeholder="例如：封面好但正文太长 / 开户向 / 3月发的">
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="saveFeedItem()">喂进去</button>
+        <button class="btn quiet" onclick="resetComposer()">清空</button>
+      </div>
+    </section>
+    <p class="note">已喂 ${state.feed.length} 条。去「风格」回看全部海报和文案。</p>
+  `;
+}
+
+function renderComposerThumbs() {
+  return composer.images.map((src, i) => `
+    <div class="thumb">
+      <img src="${src}" alt="">
+      <button type="button" onclick="removeComposerImage(${i})">×</button>
+    </div>
+  `).join('');
+}
+
+function stashComposer() {
+  const cap = document.getElementById('f_caption');
+  const note = document.getElementById('f_note');
+  if (cap) composer.caption = cap.value;
+  if (note) composer.note = note.value;
+}
+
+function setRating(k) {
+  stashComposer();
+  composer.rating = k;
+  draw();
+}
+
+function resetComposer() {
+  composer.images = [];
+  composer.caption = '';
+  composer.rating = '';
+  composer.note = '';
+  draw();
+}
+
+function removeComposerImage(i) {
+  stashComposer();
+  composer.images.splice(i, 1);
+  draw();
+}
+
+function bindDrop() {
+  const drop = document.getElementById('drop');
+  const pick = document.getElementById('filePick');
+  if (!drop || !pick) return;
+  drop.addEventListener('click', () => pick.click());
+  pick.addEventListener('change', () => addFiles(pick.files));
+  drop.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    drop.classList.add('on');
+  });
+  drop.addEventListener('dragleave', () => drop.classList.remove('on'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('on');
+    addFiles(e.dataTransfer.files);
+  });
+}
+
+document.addEventListener('paste', async (e) => {
+  if (page !== 'feed') return;
+  const files = [...(e.clipboardData?.items || [])]
+    .filter((it) => it.type.startsWith('image/'))
+    .map((it) => it.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return;
+  e.preventDefault();
+  await addFiles(files);
+});
+
+async function addFiles(fileList) {
+  const files = [...(fileList || [])].filter((f) => f && f.type.startsWith('image/'));
+  if (!files.length) return;
+  stashComposer();
+  if (composer.images.length + files.length > 8) {
+    toast('一篇最多 8 张图', true);
+    return;
+  }
+  busy(true, '在压缩海报');
+  try {
+    for (const file of files) {
+      composer.images.push(await compressFile(file));
+    }
+    draw();
+  } catch (e) {
+    toast(e.message || '图片读取失败', true);
+  } finally {
+    busy(false);
+  }
+}
+
+async function saveFeedItem() {
+  stashComposer();
+  if (!composer.caption.trim() && !composer.images.length) {
+    toast('至少要有海报或文案', true);
+    return;
+  }
+  busy(true, '在保存');
+  try {
+    const payload = {
+      caption: composer.caption.trim(),
+      rating: composer.rating,
+      note: composer.note.trim(),
+      images: composer.images.map((dataUrl, i) => ({
+        name: String(i) + '.jpg',
+        mime: 'image/jpeg',
+        dataUrl
+      }))
+    };
+    const res = await post('/api/feed', payload);
+    const item = res.item;
+    if (item) {
+      for (let i = 0; i < composer.images.length; i++) {
+        await idbSet(item.id + ':' + i, composer.images[i]);
+      }
+      const merged = await hydratePreviews(mergeById(res.items || [], state.feed));
+      rememberFeed(merged);
+    }
+    if (res.style) state.style = res.style;
+    resetComposer();
+    toast('已喂入');
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    busy(false);
+  }
+}
+
+function viewStyle() {
+  const items = [...state.feed].reverse();
+  const tags = state.style.tags || [];
+  return `
+    <h1>已学会的风格</h1>
+    <p class="lead">这些是你们从小红书存进来的真实帖。点开可看完整文案和海报。</p>
+    <div class="stat-row">
+      <span class="pill hot">${state.style.count || 0} 条</span>
+      <span class="pill">文案均长 ${state.style.avgChars || 0} 字</span>
+      ${(tags.slice(0, 6).map((t) => `<span class="pill">${esc(t.tag)} ${t.n}</span>`).join(''))}
+    </div>
+    ${items.length === 0 ? `
+      <div class="empty">还没有旧帖。<div class="actions" style="margin-top:16px"><button class="btn" onclick="go('feed')">去喂帖</button></div></div>
+    ` : `
+      <div class="style-grid">
+        ${items.map((item) => {
+          const src = coverSrc(item, 0);
+          const rating = item.rating === 'good' ? '较好' : item.rating === 'bad' ? '较差' : item.rating === 'ok' ? '一般' : '';
+          return `
+            <article class="style-card">
+              <div class="card-cover">${src ? `<img src="${esc(src)}" alt="">` : ''}</div>
+              <div class="body">
+                <div class="cap">${esc((item.caption || '（只有海报）').slice(0, 160))}${(item.caption || '').length > 160 ? '…' : ''}</div>
+                <div class="meta">${esc(whenFull(item.createdAt))}${rating ? ' · ' + rating : ''}</div>
+                <div class="actions more">
+                  <button class="btn ghost small" onclick="openFeedItem('${item.id}')">看</button>
+                  <button class="btn quiet small" onclick="removeFeed('${item.id}')">删</button>
+                </div>
+              </div>
+            </article>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
+
+function openFeedItem(id) {
+  const item = state.feed.find((x) => x.id === id);
+  if (!item) { toast('找不到这条', true); return; }
+  const imgs = (item.images || []).map((img) => {
+    const src = img.preview || img.url || '';
+    return src ? `<img src="${esc(src)}" alt="" style="width:100%;border-radius:10px;margin:0 0 10px">` : '';
+  }).join('');
+  const sheet = document.getElementById('sheet');
+  sheet.classList.remove('hidden');
+  sheet.onclick = null;
+  sheet.innerHTML = `
+    <div class="sheet-card" onclick="event.stopPropagation()">
+      <h2>真实旧帖</h2>
+      ${imgs}
+      <pre style="white-space:pre-wrap;font-family:var(--sans);font-size:14px;line-height:1.7">${esc(item.caption || '（无文案）')}</pre>
+      ${item.note ? `<p class="hint" style="margin-top:10px">${esc(item.note)}</p>` : ''}
+      <div class="actions" style="margin-top:18px">
+        <button class="btn" type="button" onclick="copyFeedCaption('${item.id}')">复制文案</button>
+        <button class="btn ghost" type="button" onclick="closeSheet()">关闭</button>
+      </div>
+    </div>
+  `;
+  setTimeout(() => { sheet.onclick = closeSheet; }, 0);
+}
+
+function copyFeedCaption(id) {
+  const item = state.feed.find((x) => x.id === id);
+  copy((item && item.caption) || '');
+  toast('文案已复制');
+}
+
+async function removeFeed(id) {
+  if (!confirm('删除这条旧帖？')) return;
+  try {
+    const res = await del('/api/feed/' + id);
+    const item = state.feed.find((x) => x.id === id);
+    const n = item && item.images ? item.images.length : 8;
+    for (let i = 0; i < n; i++) await idbDel(id + ':' + i);
+    rememberFeed(await hydratePreviews(res.items || state.feed.filter((x) => x.id !== id)));
+    if (res.style) state.style = res.style;
+    draw();
+    toast('已删除');
+  } catch (e) {
+    toast(e.message, true);
   }
 }
 
@@ -193,7 +711,7 @@ function viewRules() {
   const r = state.rules || {};
   return `
     <h1>账号规则</h1>
-    <p class="lead">左边写定位、人群、人设；右边是每次生成都会带上的格式细则。改完会自动保存。</p>
+    <p class="lead">这些规则每次出稿都会带上。真实旧帖优先，规则用来兜底。</p>
     <div class="rules-grid">
       <section class="panel">
         <h2>主号设定</h2>
@@ -210,7 +728,6 @@ function viewRules() {
           <textarea id="r_persona" rows="5">${esc(r.persona)}</textarea>
         </div>
         <div class="actions">
-          <button class="btn ghost" onclick="copyRulesPrompt()">复制规则 Prompt</button>
           <button class="btn" onclick="exportRulesPdf()">导出 PDF</button>
           <button class="btn quiet" onclick="resetRules()">恢复默认</button>
         </div>
@@ -256,7 +773,7 @@ function viewRules() {
           <textarea id="r_prohibitions" rows="3">${esc(r.prohibitions)}</textarea>
         </div>
         <div class="field">
-          <label>素材怎么用</label>
+          <label>旧帖和素材怎么用</label>
           <textarea id="r_materialConstraint" rows="3">${esc(r.materialConstraint)}</textarea>
         </div>
       </section>
@@ -305,17 +822,6 @@ async function saveRules(manual) {
   }
 }
 
-async function copyRulesPrompt() {
-  if (rulesDirty) await saveRules(false);
-  try {
-    const data = await api('/api/rules/prompt');
-    copy(data.prompt);
-    toast('规则 Prompt 已复制');
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
 async function resetRules() {
   if (!confirm('恢复成 CPLUS 默认规则？')) return;
   try {
@@ -330,68 +836,6 @@ async function resetRules() {
   }
 }
 
-function viewMaterials() {
-  const items = state.materials;
-  return `
-    <h1>素材</h1>
-    <p class="lead">只留标题、摘要、核心观点。每条都会记下添加时间。</p>
-    <div class="actions" style="margin-bottom:20px">
-      <button class="btn" onclick="openMaterial()">添加一篇</button>
-    </div>
-    ${items.length === 0 ? `
-      <div class="empty">还没有素材。从最近一篇公众号开始即可。</div>
-    ` : `
-      <div class="list">
-        ${items.map((m) => `
-          <div class="item">
-            <div>
-              <h3>${esc(m.title)}</h3>
-              ${m.summary ? `<p>${esc(m.summary)}</p>` : ''}
-              <div class="meta">${whenFull(m.createdAt) || whenFull(m.updatedAt) || '时间未记录'}</div>
-            </div>
-            <div class="actions">
-              <button class="btn ghost small" onclick="exportMaterialPdf('${m.id}')">PDF</button>
-              <button class="btn ghost small" onclick="openMaterial('${m.id}')">改</button>
-              <button class="btn quiet small" onclick="removeMaterial('${m.id}')">删</button>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    `}
-  `;
-}
-
-function openMaterial(id) {
-  const m = id ? state.materials.find((x) => x.id === id) : null;
-  document.getElementById('sheet').classList.remove('hidden');
-  document.getElementById('sheet').innerHTML = `
-    <div class="sheet-card" onclick="event.stopPropagation()">
-      <h2>${m ? '改素材' : '添加一篇'}</h2>
-      <div class="field">
-        <label>标题</label>
-        <input type="text" id="m_title" value="${esc(m?.title || '')}">
-      </div>
-      <div class="field">
-        <label>摘要</label>
-        <textarea id="m_summary" rows="2">${esc(m?.summary || '')}</textarea>
-      </div>
-      <div class="field">
-        <label>核心观点</label>
-        <textarea id="m_keyPoints" rows="3">${esc(m?.keyPoints || '')}</textarea>
-      </div>
-      <div class="field">
-        <label>关键片段</label>
-        <textarea id="m_snippet" rows="4">${esc(m?.snippet || '')}</textarea>
-      </div>
-      <div class="actions">
-        <button class="btn" onclick="saveMaterial('${m?.id || ''}')">${m ? '保存' : '添加'}</button>
-        <button class="btn ghost" onclick="closeSheet()">取消</button>
-      </div>
-    </div>
-  `;
-  document.getElementById('sheet').onclick = closeSheet;
-}
-
 function closeSheet() {
   const el = document.getElementById('sheet');
   el.classList.add('hidden');
@@ -399,274 +843,10 @@ function closeSheet() {
   el.onclick = null;
 }
 
-async function saveMaterial(id) {
-  const data = {
-    title: val('m_title'),
-    summary: val('m_summary'),
-    keyPoints: val('m_keyPoints'),
-    snippet: val('m_snippet')
-  };
-  if (!data.title) { toast('先写标题', true); return; }
-  try {
-    if (id) {
-      const result = await put('/api/materials/' + id, data);
-      const next = result.items || state.materials.map((m) => m.id === id ? { ...m, ...data } : m);
-      rememberMats(next);
-    } else {
-      const result = await post('/api/materials', data);
-      const next = result.items && result.items.length
-        ? mergeById(state.materials, result.items)
-        : (result.item ? mergeById(state.materials, [result.item]) : state.materials);
-      rememberMats(next);
-    }
-    closeSheet();
-    draw();
-    toast(id ? '已更新' : '已添加');
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function removeMaterial(id) {
-  if (!confirm('删除这篇素材？')) return;
-  try {
-    await del('/api/materials/' + id);
-    rememberMats(state.materials.filter((m) => m.id !== id));
-    draw();
-    toast('已删除');
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-function setKind(k) {
-  promptKind = k;
-  lastPrompt = '';
-  draw();
-}
-
-function viewPrompt() {
-  const tabs = [
-    ['schedule', '排期'],
-    ['posts', '图文'],
-    ['iterate', '迭代']
-  ];
-  return `
-    <h1>做 Prompt</h1>
-    <p class="lead">选一种，填最少的输入，复制完整 Prompt。结果可以贴回存档。</p>
-    <div class="tabs">
-      ${tabs.map(([k, label]) => `
-        <button type="button" class="${promptKind === k ? 'on' : ''}" onclick="setKind('${k}')">${label}</button>
-      `).join('')}
-    </div>
-    ${promptKind === 'schedule' ? formSchedule() : promptKind === 'posts' ? formPosts() : formIterate()}
-    ${lastPrompt ? renderPromptBox() : ''}
-  `;
-}
-
-function formSchedule() {
-  const weeks = state.settings?.planWeeks || 4;
-  const n = state.settings?.postsPerWeek || 3;
-  if (!state.materials.length) {
-    return `<div class="empty">先去「素材」加几篇公众号，再做排期 Prompt。<div class="actions" style="margin-top:16px"><button class="btn ghost" onclick="go('materials')">去添加</button></div></div>`;
-  }
-  return `
-    <div class="row">
-      <div class="field narrow">
-        <label>周数</label>
-        <input type="number" id="s_weeks" value="${weeks}" min="1" max="12">
-      </div>
-      <div class="field narrow">
-        <label>每周篇数</label>
-        <input type="number" id="s_ppw" value="${n}" min="1" max="7">
-      </div>
-    </div>
-    <div class="field">
-      <label>用哪些素材</label>
-      <div class="pick">
-        ${state.materials.map((m) => `
-          <label class="opt">
-            <input type="checkbox" value="${esc(m.id)}" checked>
-            <div>${esc(m.title)}<span><br>${esc(whenFull(m.createdAt))}${m.summary ? ' · ' + esc(m.summary) : ''}</span></div>
-          </label>
-        `).join('')}
-      </div>
-    </div>
-    <div class="actions">
-      <button class="btn" onclick="makeSchedule()">生成排期 Prompt</button>
-    </div>
-  `;
-}
-
-function formPosts() {
-  const last = state.schedules[state.schedules.length - 1];
-  const snippets = state.materials
-    .filter((m) => m.snippet)
-    .map((m) => `【${m.title}】\n${m.snippet}`)
-    .join('\n\n');
-  return `
-    <div class="field">
-      <label>本周排期</label>
-      <textarea id="g_schedule" rows="7" placeholder="从存档复制，或直接粘贴其他 AI 给出的排期表">${esc(last?.content || '')}</textarea>
-      <p class="hint">${last ? '已带入最近一份存档排期，可改。' : '还没有存档排期，把其他 AI 的表贴这里。'}</p>
-    </div>
-    <div class="field">
-      <label>对应片段</label>
-      <textarea id="g_snips" rows="6" placeholder="每篇只用到的关键段落，不要全文">${esc(snippets)}</textarea>
-    </div>
-    <div class="actions">
-      <button class="btn" onclick="makePosts()">生成图文 Prompt</button>
-    </div>
-  `;
-}
-
-function formIterate() {
-  return `
-    <div class="field">
-      <label>这批笔记怎么样</label>
-      <textarea id="f_fb" rows="4" placeholder="哪几篇好，哪几篇差，现象即可"></textarea>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label>较好的选题</label>
-        <input type="text" id="f_good">
-      </div>
-      <div class="field">
-        <label>较差的选题</label>
-        <input type="text" id="f_bad">
-      </div>
-    </div>
-    <div class="actions">
-      <button class="btn" onclick="makeIterate()">生成迭代 Prompt</button>
-    </div>
-  `;
-}
-
-function renderPromptBox() {
-  return `
-    <section class="prompt">
-      <div class="prompt-head">
-        <h2>Prompt</h2>
-        <button class="btn ghost small" onclick="copyLast()">复制</button>
-      </div>
-      <pre id="promptText">${esc(lastPrompt)}</pre>
-      <div style="padding-top:20px">
-        <label>把其他 AI 的结果贴回来</label>
-        <textarea id="pasteBack" rows="6" placeholder="整段贴进来，存进「存档」"></textarea>
-        <div class="actions">
-          <button class="btn ghost" onclick="savePaste()">${promptKind === 'iterate' ? '保存迭代' : promptKind === 'posts' ? '保存稿件' : '保存排期'}</button>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-function copyLast() {
-  if (!lastPrompt) return;
-  copy(lastPrompt);
-  toast('已复制');
-}
-
-async function makeSchedule() {
-  const ids = [...document.querySelectorAll('.pick input:checked')].map((i) => i.value);
-  const materials = state.materials.filter((m) => ids.includes(m.id));
-  if (!materials.length) { toast('至少选一篇素材', true); return; }
-  busy(true);
-  try {
-    const res = await post('/api/prompt/schedule', {
-      materials,
-      weeks: num('s_weeks', 4),
-      postsPerWeek: num('s_ppw', 3)
-    });
-    lastPrompt = res.prompt;
-    draw();
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    busy(false);
-  }
-}
-
-async function makePosts() {
-  const schedule = val('g_schedule');
-  if (!schedule) { toast('先放排期', true); return; }
-  const scheduleItems = schedule.split('\n').filter((l) => l.trim()).map((line) => {
-    const parts = line.split(/[|｜]/).map((p) => p.trim()).filter(Boolean);
-    return { title: parts[0] || line, summary: parts.slice(1).join(' '), materialRef: '' };
-  });
-  busy(true);
-  try {
-    const res = await post('/api/prompt/posts', {
-      scheduleText: schedule,
-      scheduleItems,
-      materialSnippets: val('g_snips')
-    });
-    lastPrompt = res.prompt;
-    draw();
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    busy(false);
-  }
-}
-
-async function makeIterate() {
-  const feedback = val('f_fb');
-  if (!feedback) { toast('先写反馈', true); return; }
-  busy(true);
-  try {
-    const res = await post('/api/prompt/iterate', {
-      feedback,
-      goodPosts: val('f_good'),
-      badPosts: val('f_bad')
-    });
-    lastPrompt = res.prompt;
-    draw();
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    busy(false);
-  }
-}
-
-async function savePaste() {
-  const content = val('pasteBack');
-  if (!content) { toast('先把结果贴进来', true); return; }
-  try {
-    if (promptKind === 'schedule') {
-      await post('/api/schedules', { name: '排期 ' + whenFull(new Date().toISOString()), content });
-      const sch = await api('/api/schedules');
-      state.schedules = sch.items || [];
-      toast('排期已存');
-    } else if (promptKind === 'posts') {
-      const parts = content.split(/—{2,}|-{4,}/).map((p) => p.trim()).filter((p) => p.length > 10);
-      const posts = parts.length > 1 ? parts : [content];
-      for (const p of posts) {
-        const m = p.match(/【封面标题】[：:](.+)/);
-        await post('/api/posts', { title: m ? m[1].trim() : '稿件', content: p });
-      }
-      const data = await api('/api/posts');
-      state.posts = data.items || [];
-      toast(`已存 ${posts.length} 篇`);
-    } else {
-      const iterations = state.rules.iterations || [];
-      iterations.push({ date: new Date().toISOString(), summary: content.slice(0, 80), content });
-      const res = await post('/api/rules', { ...state.rules, iterations });
-      state.rules = res.rules;
-      toast('迭代已存');
-    }
-    document.getElementById('pasteBack').value = '';
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
 function viewArchive() {
-  const s = state.settings || {};
   return `
     <h1>存档</h1>
-    <p class="lead">排期、稿件和规则都可以导出成 PDF，长期留底。</p>
-
+    <p class="lead">出稿后贴回来的排期和成稿都在这里，可导出 PDF。</p>
     <section class="archive-block">
       <h2>排期</h2>
       ${state.schedules.length === 0 ? '<div class="empty">还没有排期。</div>' : `
@@ -687,10 +867,9 @@ function viewArchive() {
         </div>
       `}
     </section>
-
     <section class="archive-block">
-      <h2>稿件</h2>
-      ${state.posts.length === 0 ? '<div class="empty">还没有稿件。</div>' : `
+      <h2>成稿</h2>
+      ${state.posts.length === 0 ? '<div class="empty">还没有成稿。</div>' : `
         <div class="list">
           ${state.posts.map((x) => `
             <div class="item">
@@ -708,36 +887,16 @@ function viewArchive() {
         </div>
       `}
     </section>
-
-    <section class="archive-block">
-      <h2>参数</h2>
-      <div class="row">
-        <div class="field narrow">
-          <label>默认周数</label>
-          <input type="number" id="set_weeks" value="${s.planWeeks || 4}" min="1" max="12">
-        </div>
-        <div class="field narrow">
-          <label>每周篇数</label>
-          <input type="number" id="set_ppw" value="${s.postsPerWeek || 3}" min="1" max="7">
-        </div>
-      </div>
-      <div class="actions">
-        <button class="btn ghost" onclick="saveSettings()">保存参数</button>
-        <button class="btn" onclick="exportPdf()">导出 PDF</button>
-      </div>
-    </section>
+    <div class="actions">
+      <button class="btn" onclick="exportPdf()">导出全部 PDF</button>
+    </div>
   `;
-}
-
-function jsStr(s) {
-  return JSON.stringify(s || '').replace(/</g, '\\u003c');
 }
 
 function viewSaved(kind, id) {
   const item = (state[kind] || []).find((x) => String(x.id) === String(id));
   if (!item) { toast('找不到这条记录', true); return; }
-  const title = item.name || item.title || '详情';
-  openText(title, item.content || '');
+  openText(item.name || item.title || '详情', item.content || '');
 }
 
 function openText(title, content) {
@@ -755,9 +914,7 @@ function openText(title, content) {
     </div>
   `;
   const copyBtn = document.getElementById('copySavedBtn');
-  if (copyBtn) {
-    copyBtn.onclick = () => { copy(content || ''); toast('已复制'); };
-  }
+  if (copyBtn) copyBtn.onclick = () => { copy(content || ''); toast('已复制'); };
   setTimeout(() => { sheet.onclick = closeSheet; }, 0);
 }
 
@@ -778,19 +935,6 @@ async function removePost(id) {
     await del('/api/posts/' + id);
     state.posts = state.posts.filter((x) => x.id !== id);
     draw();
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
-
-async function saveSettings() {
-  try {
-    const res = await post('/api/settings', {
-      planWeeks: num('set_weeks', 4),
-      postsPerWeek: num('set_ppw', 3)
-    });
-    state.settings = res.settings;
-    toast('参数已保存');
   } catch (e) {
     toast(e.message, true);
   }
@@ -906,54 +1050,37 @@ function ruleRowsHtml(r) {
     ['配图思路', r.imageSuggestions],
     ['标签', r.tagRule],
     ['禁止', r.prohibitions],
-    ['素材怎么用', r.materialConstraint]
+    ['旧帖和素材怎么用', r.materialConstraint]
   ].map(([k, v]) => `<p><strong>${esc(k)}：</strong>${esc(v || '—')}</p>`).join('');
 }
 
 async function exportRulesPdf() {
   if (rulesDirty) await saveRules(false);
-  let prompt = '';
-  try {
-    prompt = (await api('/api/rules/prompt')).prompt || '';
-  } catch (e) {
-    toast(e.message, true);
-    return;
-  }
   const r = state.rules || {};
-  const html = wrapPdf('账号规则 Prompt', `
-    ${pdfSection('主号设定与格式细则', ruleRowsHtml(r))}
-    ${pdfSection('生成的规则 Prompt', `<p>${esc(prompt)}</p>`)}
-  `);
-  await downloadPdf(html, `CPLUS-规则Prompt-${new Date().toISOString().slice(0, 10)}.pdf`);
+  const html = wrapPdf('账号规则', pdfSection('主号设定与格式细则', ruleRowsHtml(r)));
+  await downloadPdf(html, `CPLUS-规则-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
-async function exportMaterialPdf(id) {
-  const m = state.materials.find((x) => x.id === id);
-  if (!m) { toast('找不到这条素材', true); return; }
-  const html = wrapPdf('公众号素材', `
-    <h2>${esc(m.title)}</h2>
-    <p class="pdf-time">${esc(whenFull(m.createdAt))}</p>
-    ${pdfSection('摘要', `<p>${esc(m.summary || '—')}</p>`)}
-    ${pdfSection('核心观点', `<p>${esc(m.keyPoints || '—')}</p>`)}
-    ${pdfSection('关键片段', `<p>${esc(m.snippet || '—')}</p>`)}
-  `);
-  await downloadPdf(html, `CPLUS-素材-${safeName(m.title)}.pdf`);
+async function exportResultPdf() {
+  const content = val('pasteBack') || lastResult;
+  if (!content) { toast('先把成稿贴回来', true); return; }
+  const html = wrapPdf(lastCommand || '本周成稿', `<p>${esc(content)}</p>`);
+  await downloadPdf(html, `CPLUS-成稿-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 async function exportPdf() {
   const data = await api('/api/export');
   const r = data.rules || {};
-  const mats = (data.materials && data.materials.items) || [];
+  const feed = (data.feed && data.feed.items) || state.feed;
   const sch = (data.schedules && data.schedules.items) || [];
   const posts = (data.posts && data.posts.items) || [];
-  const matHtml = mats.length ? mats.map((m) => `
+  const feedHtml = feed.length ? feed.map((m) => `
     <div class="pdf-block">
-      <h3>${esc(m.title)}</h3>
-      <p class="pdf-time">${esc(whenFull(m.createdAt))}</p>
-      <p>${esc(m.summary || '')}</p>
-      <p>${esc(m.keyPoints || '')}</p>
+      <h3>${esc((m.caption || '海报').split('\n')[0].slice(0, 40))}</h3>
+      <p class="pdf-time">${esc(whenFull(m.createdAt))}${m.rating ? ' · ' + esc(m.rating) : ''}</p>
+      <p>${esc(m.caption || '')}</p>
     </div>
-  `).join('') : '<p>暂无素材</p>';
+  `).join('') : '<p>暂无旧帖</p>';
   const schHtml = sch.length ? sch.map((x) => `
     <div class="pdf-block">
       <h3>${esc(x.name || '排期')}</h3>
@@ -967,18 +1094,18 @@ async function exportPdf() {
       <p class="pdf-time">${esc(whenFull(x.createdAt))}</p>
       <p>${esc(x.content || '')}</p>
     </div>
-  `).join('') : '<p>暂无稿件</p>';
-  const html = wrapPdf('CPLUS 小红书内容存档', `
+  `).join('') : '<p>暂无成稿</p>';
+  const html = wrapPdf('CPLUS 小红书助理存档', `
     ${pdfSection('账号规则', ruleRowsHtml(r))}
-    ${pdfSection('素材', matHtml)}
+    ${pdfSection('已喂旧帖', feedHtml)}
     ${pdfSection('排期', schHtml)}
-    ${pdfSection('稿件', postHtml)}
+    ${pdfSection('成稿', postHtml)}
   `);
   await downloadPdf(html, 'CPLUS-小红书存档-' + new Date().toISOString().slice(0, 10) + '.pdf');
 }
 
 window.addEventListener('beforeunload', (e) => {
-  if (!rulesDirty) return;
+  if (!rulesDirty && !composer.images.length && !composer.caption) return;
   e.preventDefault();
   e.returnValue = '';
 });
