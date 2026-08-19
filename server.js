@@ -389,11 +389,7 @@ const auth = createAuth({ readData, writeData, ensureDataFile, newId });
 app.use((req, res, next) => {
   if (req.path === '/healthz') return next();
   if (!req.path.startsWith('/api')) return next();
-  if (req.path === '/api/auth/login' && req.method === 'POST') return next();
   req.user = auth.currentUser(req);
-  if (!auth.isAuthed(req.user)) {
-    return res.status(401).json({ error: '请先登录', code: 'UNAUTHENTICATED' });
-  }
   next();
 });
 

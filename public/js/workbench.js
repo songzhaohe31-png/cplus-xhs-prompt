@@ -3,14 +3,14 @@ state.knowledge = state.knowledge || [];
 state.contents = state.contents || [];
 state.metrics = state.metrics || [];
 state.suggestions = state.suggestions || [];
-state.me = state.me || { user: null, ai: { configured: false } };
+state.me = state.me || { user: { id: 'open', name: 'CPLUS', role: 'admin' }, ai: { configured: false } };
 state.chatLog = state.chatLog || [];
 state.calCursor = state.calCursor || new Date();
 state.calMode = state.calMode || 'month';
 let chatBusy = false;
 let chatAbort = null;
 state.lastStructured = state.lastStructured || null;
-state.authed = false;
+state.authed = true;
 let promptKind = 'schedule';
 let lastPrompt = '';
 const draft = {
@@ -23,55 +23,20 @@ function toggleSide() {
   document.getElementById('side').classList.toggle('open');
 }
 
-function isAdmin() { return (state.me.user || {}).role === 'admin'; }
+function isAdmin() { return true; }
 function isReviewer() { return ['admin', 'reviewer'].includes((state.me.user || {}).role); }
 
 function paintChrome() {
-  const me = state.me.user || {};
   const ai = state.me.ai || {};
   const foot = document.getElementById('sideFoot');
   if (foot) {
-    foot.innerHTML = `<span class="role-badge">${esc(me.role || '')}</span><div style="margin-top:8px">${esc(me.name || '')}<br>AI：${ai.configured ? esc(ai.provider || '') + ' · ' + esc(ai.model || '') : '未配置'}</div><button class="btn quiet small" style="margin-top:8px" onclick="doLogout()">退出</button>`;
+    foot.innerHTML = `<div>AI：${ai.configured ? esc(ai.provider || '') + ' · ' + esc(ai.model || '') : '未配置'}</div>`;
   }
   const top = document.getElementById('topActions');
-  if (top) {
-    top.innerHTML = `<span class="role-badge">${esc(me.role || '')}</span><button class="btn ghost small" onclick="doLogout()">退出</button>`;
-  }
+  if (top) top.innerHTML = '';
   document.querySelectorAll('.admin-only').forEach((el) => {
-    el.style.display = me.role === 'admin' ? '' : 'none';
+    el.style.display = '';
   });
-}
-
-function viewLoginGate(err) {
-  document.getElementById('stage').innerHTML = `
-    <div class="hero-chat" style="max-width:420px;margin:10vh auto">
-      <h1>登录 CPLUS 工作台</h1>
-      <p class="lead">必须使用管理员发放的账号。密钥与口令不会显示在此页面。</p>
-      ${err ? `<div class="warn">${esc(err)}</div>` : ''}
-      <div class="field"><label>用户名</label><input id="login_name" autocomplete="username"></div>
-      <div class="field"><label>密码</label><input id="login_password" type="password" autocomplete="current-password"></div>
-      <div class="actions"><button class="btn" onclick="doLogin()">登录</button></div>
-    </div>`;
-  showSavebar(false);
-}
-
-async function doLogin() {
-  try {
-    const res = await post('/api/auth/login', { name: val('login_name') || val('pin'), password: val('login_password') || val('pin') });
-    state.me.user = res.user;
-    state.authed = true;
-    closeSheet();
-    toast('已登录');
-    await bootWorkbench();
-    draw();
-  } catch (e) { toast(e.message, true); }
-}
-
-async function doLogout() {
-  try { await post('/api/auth/logout', {}); } catch (e) { /* ignore */ }
-  state.authed = false;
-  state.me = { user: null, ai: {} };
-  viewLoginGate();
 }
 
 async function bootWorkbench() {
@@ -93,21 +58,13 @@ async function bootWorkbench() {
     state.suggestions = suggestions.items || [];
     paintChrome();
   } catch (e) {
-    if (e.status === 401 || e.code === 'UNAUTHENTICATED') {
-      state.authed = false;
-      viewLoginGate();
-      throw e;
-    }
     console.warn(e);
+    state.authed = true;
   }
 }
 
 const _draw = draw;
 draw = function () {
-  if (!state.authed) {
-    viewLoginGate();
-    return;
-  }
   document.querySelectorAll('.nav button').forEach((b) => b.classList.toggle('on', b.dataset.page === page));
   const side = document.getElementById('side');
   if (side && window.innerWidth < 860) side.classList.remove('open');
@@ -147,15 +104,8 @@ go = async function (name) {
 
 const _boot = boot;
 boot = async function () {
-  try {
-    await bootWorkbench();
-  } catch (e) {
-    if (e.status === 401) return;
-  }
-  try { await _boot(); } catch (e) {
-    if (e.status === 401) return;
-  }
-  if (!state.authed) return;
+  await bootWorkbench();
+  await _boot();
   const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce', 'library', 'history', 'aisettings', 'logs'];
   if (!allowed.includes(page)) page = 'chat';
   draw();
