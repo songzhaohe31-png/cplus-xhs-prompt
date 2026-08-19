@@ -3,11 +3,14 @@ state.knowledge = state.knowledge || [];
 state.contents = state.contents || [];
 state.metrics = state.metrics || [];
 state.suggestions = state.suggestions || [];
-state.me = state.me || { user: { role: 'admin', name: '开放模式' }, ai: { configured: false } };
+state.me = state.me || { user: null, ai: { configured: false } };
 state.chatLog = state.chatLog || [];
 state.calCursor = state.calCursor || new Date();
 state.calMode = state.calMode || 'month';
 let chatBusy = false;
+let chatAbort = null;
+state.lastStructured = state.lastStructured || null;
+state.authed = false;
 let promptKind = 'schedule';
 let lastPrompt = '';
 const draft = {
@@ -28,41 +31,47 @@ function paintChrome() {
   const ai = state.me.ai || {};
   const foot = document.getElementById('sideFoot');
   if (foot) {
-    foot.innerHTML = `<span class="role-badge">${esc(me.role || 'guest')}</span><div style="margin-top:8px">${esc(me.name || '')}<br>AI：${ai.configured ? '已接服务器接口' : '未配置，走任务打包'}</div>`;
+    foot.innerHTML = `<span class="role-badge">${esc(me.role || '')}</span><div style="margin-top:8px">${esc(me.name || '')}<br>AI：${ai.configured ? esc(ai.provider || '') + ' · ' + esc(ai.model || '') : '未配置'}</div><button class="btn quiet small" style="margin-top:8px" onclick="doLogout()">退出</button>`;
   }
   const top = document.getElementById('topActions');
   if (top) {
-    top.innerHTML = `
-      <span class="role-badge">${esc(me.role || '')}</span>
-      <button class="btn ghost small" onclick="openLogin()">${me.id && me.id.indexOf('guest') === 0 ? '登录' : '切换'}</button>
-    `;
+    top.innerHTML = `<span class="role-badge">${esc(me.role || '')}</span><button class="btn ghost small" onclick="doLogout()">退出</button>`;
   }
+  document.querySelectorAll('.admin-only').forEach((el) => {
+    el.style.display = me.role === 'admin' ? '' : 'none';
+  });
 }
 
-function openLogin() {
-  const sheet = document.getElementById('sheet');
-  sheet.classList.remove('hidden');
-  sheet.innerHTML = `
-    <div class="sheet-card" onclick="event.stopPropagation()">
-      <h2>登录工作台</h2>
-      <p class="hint">默认口令 Admin 2468 / Editor 1357 / Reviewer 8642。可在权限页修改。开放模式无需登录。</p>
-      <div class="field"><label>口令</label><input type="password" id="pin"></div>
-      <div class="actions">
-        <button class="btn" onclick="doLogin()">进入</button>
-        <button class="btn ghost" onclick="closeSheet()">取消</button>
-      </div>
+function viewLoginGate(err) {
+  document.getElementById('stage').innerHTML = `
+    <div class="hero-chat" style="max-width:420px;margin:10vh auto">
+      <h1>登录 CPLUS 工作台</h1>
+      <p class="lead">必须使用管理员发放的账号。密钥与口令不会显示在此页面。</p>
+      ${err ? `<div class="warn">${esc(err)}</div>` : ''}
+      <div class="field"><label>用户名</label><input id="login_name" autocomplete="username"></div>
+      <div class="field"><label>密码</label><input id="login_password" type="password" autocomplete="current-password"></div>
+      <div class="actions"><button class="btn" onclick="doLogin()">登录</button></div>
     </div>`;
-  sheet.onclick = closeSheet;
+  showSavebar(false);
 }
 
 async function doLogin() {
   try {
-    const res = await post('/api/auth/login', { pin: val('pin') });
+    const res = await post('/api/auth/login', { name: val('login_name') || val('pin'), password: val('login_password') || val('pin') });
     state.me.user = res.user;
+    state.authed = true;
     closeSheet();
-    paintChrome();
-    toast('已登录 ' + res.user.role);
+    toast('已登录');
+    await bootWorkbench();
+    draw();
   } catch (e) { toast(e.message, true); }
+}
+
+async function doLogout() {
+  try { await post('/api/auth/logout', {}); } catch (e) { /* ignore */ }
+  state.authed = false;
+  state.me = { user: null, ai: {} };
+  viewLoginGate();
 }
 
 async function bootWorkbench() {
@@ -76,19 +85,29 @@ async function bootWorkbench() {
       api('/api/suggestions')
     ]);
     state.me = me;
+    state.authed = true;
     state.agent = agent;
     state.knowledge = knowledge.items || [];
     state.contents = contents.items || [];
     state.metrics = metrics.items || [];
     state.suggestions = suggestions.items || [];
+    paintChrome();
   } catch (e) {
+    if (e.status === 401 || e.code === 'UNAUTHENTICATED') {
+      state.authed = false;
+      viewLoginGate();
+      throw e;
+    }
     console.warn(e);
   }
-  paintChrome();
 }
 
 const _draw = draw;
 draw = function () {
+  if (!state.authed) {
+    viewLoginGate();
+    return;
+  }
   document.querySelectorAll('.nav button').forEach((b) => b.classList.toggle('on', b.dataset.page === page));
   const side = document.getElementById('side');
   if (side && window.innerWidth < 860) side.classList.remove('open');
@@ -103,7 +122,11 @@ draw = function () {
     review: viewReview,
     users: viewUsers,
     prompt: viewPromptTools,
-    materials: viewMaterialsPage
+    materials: viewMaterialsPage,
+    library: viewLibrary,
+    history: viewHistory,
+    aisettings: viewAiSettings,
+    logs: viewLogs
   };
   if (extra[page]) {
     showSavebar(false);
@@ -117,54 +140,60 @@ draw = function () {
 
 const _go = go;
 go = async function (name) {
-  const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce'];
+  const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce', 'library', 'history', 'aisettings', 'logs'];
   if (!allowed.includes(name)) name = 'chat';
   await _go(name);
 };
 
 const _boot = boot;
 boot = async function () {
-  await _boot();
-  await bootWorkbench();
-  if (!['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce'].includes(page)) {
-    page = 'chat';
+  try {
+    await bootWorkbench();
+  } catch (e) {
+    if (e.status === 401) return;
   }
+  try { await _boot(); } catch (e) {
+    if (e.status === 401) return;
+  }
+  if (!state.authed) return;
+  const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce', 'library', 'history', 'aisettings', 'logs'];
+  if (!allowed.includes(page)) page = 'chat';
   draw();
 };
 
 function viewChat() {
+  const ai = state.me.ai || {};
   const log = state.chatLog.map((m) => `
     <div class="bubble ${m.role}">
       <div class="meta">${m.role === 'user' ? '你' : 'CPLUS 助理'} · ${esc(m.time || '')}</div>
-      ${esc(m.text)}
+      ${m.html || `<div style="white-space:pre-wrap">${esc(m.text || '')}</div>`}
       ${m.dupHint ? `<div class="warn">${esc(m.dupHint)}</div>` : ''}
-      ${m.sources && m.sources.length ? `<div class="source-list">来源：${esc(m.sources.map((s) => s.name).join(' · '))}</div>` : ''}
-      ${m.notice ? `<p class="hint">${esc(m.notice)}</p>` : ''}
+      ${m.sources && m.sources.length ? `<div class="source-list">来源：${m.sources.map((s) => s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)}</a>` : esc(s.name)).join(' · ')}</div>` : ''}
     </div>
   `).join('');
   return `
     <h1>CPLUS跨境合规新媒体运营Agent</h1>
-    <p class="lead">全球业务，合规先行。说一句即可得到排期、成稿和海报方案。系统会自动带上品牌规则、知识库和历史内容。</p>
+    <p class="lead">输入一句指令，直接得到排期或成稿。不会再给你一段要复制的 Prompt。</p>
+    ${ai.configured ? '' : `<div class="warn">AI 尚未配置。管理员请到「AI 设置」按 Render 环境变量说明接入。系统不会假装已经生成内容。</div>`}
     <div class="quick">
       ${[
-        ['生成下个月的内容排期。', '生成月度排期'],
-        ['生成本周3篇小红书内容。', '生成本周内容'],
-        ['写一篇关于香港公司年审的小红书。', '生成单篇内容'],
-        ['根据这篇文章生成5个选题：', '文章拆解'],
-        ['检查这篇内容是否存在合规问题：', '内容合规检查'],
-        ['根据最近数据做选题复盘。', '数据复盘']
+        ['生成未来4周的小红书内容排期，每周3篇，重点推广香港公司注册、银行开户和MSO牌照。', '生成未来4周排期'],
+        ['生成本周3篇香港MSO内容。', '生成本周3篇内容'],
+        ['写一篇申请香港MSO牌照需要怎样安排人员的小红书。', '生成单篇内容'],
+        ['根据这篇文章生成5个选题：', '拆解公众号文章'],
+        ['检查这篇内容是否存在合规问题：', '检查内容合规'],
+        ['根据最近发布数据优化下个月选题。', '根据数据复盘']
       ].map(([q, lab]) => `<button class="chip" onclick="fillChat(${JSON.stringify(q)})">${lab}</button>`).join('')}
     </div>
     <section class="hero-chat">
-      <div class="chat-log">${log || '<div class="hint">还没有对话。先喂帖或上传知识库，效果更好。</div>'}</div>
-      <div id="chatProgress" class="progress hidden">正在加载规则与资料…</div>
+      <div class="chat-log">${log || '<div class="hint">从上面选一条，或自己说一句。</div>'}</div>
+      <div id="chatProgress" class="progress hidden">准备中…</div>
       <div class="field">
-        <textarea id="chatMsg" rows="4" placeholder="例如：生成下个月的内容排期。"></textarea>
+        <textarea id="chatMsg" rows="3" placeholder="例如：生成未来4周排期，每周3篇。"></textarea>
       </div>
       <div class="actions">
         <button class="btn" id="chatSend" onclick="sendChat()">发送</button>
-        <button class="btn ghost" onclick="saveLastChatToGenerate()">送去生成器</button>
-        <button class="btn quiet" onclick="go('produce')">旧版一句话出稿</button>
+        <button class="btn quiet" id="chatCancel" onclick="cancelChat()">取消</button>
       </div>
     </section>
   `;
@@ -175,47 +204,117 @@ function fillChat(q) {
   if (el) el.value = q;
 }
 
+function renderStructured(structured) {
+  if (!structured || !structured.items || !structured.items.length) return '';
+  const items = structured.items;
+  const cards = items.map((it, i) => `
+    <article class="item" style="display:block;margin-top:8px">
+      <h3>${esc(it.title || it.topic || ('条目 ' + (i + 1)))}</h3>
+      <p>${esc(it.audience || '')} ${it.purpose ? ' · ' + esc(it.purpose) : ''} ${it.pain ? ' · ' + esc(it.pain) : ''}</p>
+      ${it.body ? `<p>${esc(it.body.slice(0, 180))}${it.body.length > 180 ? '…' : ''}</p>` : ''}
+      <div class="meta">${esc(it.week || '')} ${esc(it.publishAt || '')} · Draft</div>
+    </article>
+  `).join('');
+  const isSchedule = structured.type === 'schedule';
+  return `
+    <div class="actions" style="margin:10px 0">
+      <button class="btn" onclick="saveStructuredToCalendar()">保存至日历</button>
+      ${isSchedule ? `<button class="btn ghost" onclick="fillChat('根据刚才的排期，生成全部文案'); sendChat()">生成全部文案</button>
+      <button class="btn ghost" onclick="fillChat('根据刚才的排期，生成本周文案'); sendChat()">生成本周文案</button>` : ''}
+      <button class="btn ghost" onclick="exportStructuredCsv()">导出 Excel</button>
+      <button class="btn ghost" onclick="exportStructuredDoc()">导出 Word</button>
+    </div>
+    ${cards}
+  `;
+}
+
 async function sendChat() {
   if (chatBusy) return;
   const message = val('chatMsg');
   if (!message) { toast('先写一句指令', true); return; }
+  if (!(state.me.ai && state.me.ai.configured)) {
+    toast('AI 未配置，不能生成内容', true);
+    return;
+  }
   chatBusy = true;
+  chatAbort = new AbortController();
   const btn = document.getElementById('chatSend');
   if (btn) btn.disabled = true;
   state.chatLog.push({ role: 'user', text: message, time: whenFull(new Date().toISOString()) });
-  const prog = document.getElementById('chatProgress');
-  if (prog) {
-    prog.classList.remove('hidden');
-    prog.textContent = '1/3 加载规则库…';
-  }
   draw();
   const p2 = document.getElementById('chatProgress');
-  if (p2) { p2.classList.remove('hidden'); p2.textContent = '2/3 检索知识库与历史内容…'; }
+  if (p2) {
+    p2.classList.remove('hidden');
+    p2.textContent = '检索规则、知识库与官方资料…';
+  }
   try {
-    const res = await post('/api/agent/chat', { message });
-    if (p2) p2.textContent = '3/3 生成完成';
+    if (p2) p2.textContent = '模型生成中，请稍候…';
+    const res = await api('/api/agent/chat', { method: 'POST', body: JSON.stringify({ message }), signal: chatAbort.signal });
+    if (p2) p2.textContent = '已完成';
+    state.lastStructured = res.structured;
+    lastResult = res.reply;
+    lastCommand = message;
     state.chatLog.push({
       role: 'bot',
       text: res.reply,
+      html: renderStructured(res.structured) + `<div style="white-space:pre-wrap;margin-top:10px">${esc(res.reply || '')}</div>`,
       time: whenFull(new Date().toISOString()),
       sources: res.sources,
       dupHint: res.dupHint,
-      notice: res.notice || (res.mode === 'brief' ? '未接模型，已打包完整任务。' : '')
+      official: res.official
     });
-    lastResult = res.reply;
-    lastBrief = res.reply;
-    lastCommand = message;
-    if (res.mode === 'brief') copy(res.reply);
-    toast(res.mode === 'ai' ? '已生成' : '已复制任务给外部 AI');
+    toast('已生成 ' + ((res.structured && res.structured.items && res.structured.items.length) || '') + ' 条');
   } catch (e) {
-    toast(e.message, true);
-    state.chatLog.push({ role: 'bot', text: '出错：' + e.message, time: whenFull(new Date().toISOString()) });
+    if (e.name === 'AbortError') toast('已取消');
+    else {
+      const extra = e.body && e.body.setup && e.body.setup.hint ? ' ' + e.body.setup.hint : '';
+      toast(e.message + extra, true);
+      state.chatLog.push({ role: 'bot', text: e.message + extra, time: whenFull(new Date().toISOString()) });
+    }
   } finally {
     chatBusy = false;
+    chatAbort = null;
     draw();
     const el = document.getElementById('chatMsg');
     if (el) el.value = '';
   }
+}
+
+function cancelChat() {
+  if (chatAbort) chatAbort.abort();
+}
+
+async function saveStructuredToCalendar() {
+  const items = state.lastStructured && state.lastStructured.items;
+  if (!items || !items.length) { toast('没有可保存的结构化结果', true); return; }
+  try {
+    const res = await post('/api/contents/batch', { items });
+    state.contents = res.all || state.contents.concat(res.items || []);
+    if (res.warnings && res.warnings.length) toast('已保存，但有 ' + res.warnings.length + ' 条接近历史内容');
+    else toast('已写入日历，状态 Draft');
+    go('calendar');
+  } catch (e) { toast(e.message, true); }
+}
+
+function exportStructuredCsv() {
+  const items = (state.lastStructured && state.lastStructured.items) || [];
+  if (!items.length) { toast('没有可导出的结果', true); return; }
+  const header = ['周', '发布日期', '标题', '类型', '目标客户', '痛点', '目的', '转化', '状态'];
+  const rows = items.map((it) => [it.week, it.publishAt, it.title, it.type, it.audience, it.pain, it.purpose, it.offer, 'Draft']);
+  const csv = [header].concat(rows).map((r) => r.map((c) => '"' + String(c || '').replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'CPLUS-排期.csv';
+  a.click();
+}
+
+function exportStructuredDoc() {
+  if (!lastResult) { toast('没有可导出的正文', true); return; }
+  const html = `<html><head><meta charset="utf-8"></head><body>${esc(lastResult).replace(/\n/g, '<br>')}</body></html>`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + html], { type: 'application/msword' }));
+  a.download = 'CPLUS-成稿.doc';
+  a.click();
 }
 
 function saveLastChatToGenerate() {
@@ -430,9 +529,11 @@ function viewGenerate() {
         <div class="field"><label>上传参考图</label><input id="refImg" type="file" accept="image/*" onchange="loadRefImg(event)"></div>
         <div class="poster-canvas-wrap"><canvas id="poster" width="1122" height="1402"></canvas></div>
         <div class="actions" style="margin-top:10px">
-          <button class="btn" onclick="paintPoster()">重新生成</button>
+          <button class="btn" onclick="paintPoster()">快速模板</button>
+          <button class="btn ghost" onclick="aiPoster()">AI 视觉海报</button>
           <button class="btn ghost" onclick="downloadPoster()">下载 PNG</button>
         </div>
+        <p class="hint">快速模板是 Canvas 排版，不是 AI 生图。AI 视觉会先生成无字主视觉，再叠中文标题。</p>
       </section>
     </div>
   `;
@@ -524,6 +625,21 @@ function wrapText(g, text, x, y, maxW, lineH, font) {
     } else line = test;
   });
   g.fillText(line, x, yy);
+}
+
+async function aiPoster() {
+  stashDraft();
+  busy(true, '生成无字主视觉');
+  try {
+    const points = (draft.subtitle || '').split(/\n|；|;/).filter(Boolean).slice(0, 3);
+    const res = await post('/api/posters/ai', { title: draft.title, subtitle: draft.subtitle, points });
+    const img = new Image();
+    img.onload = () => { refImage = img; paintPoster(); toast('已叠中文标题'); };
+    img.src = res.visual;
+  } catch (e) {
+    toast(e.message + '，已改用快速模板', true);
+    paintPoster();
+  } finally { busy(false); }
 }
 
 function downloadPoster() {
@@ -803,43 +919,94 @@ async function applySuggestion(id) {
 
 function viewUsers() {
   return `
-    <h1>权限</h1>
-    <p class="lead">Admin 改规则、知识库、用户和 AI 接口；Editor 生成与提交；Reviewer 事实/合规审核。默认开放模式，所有人可先用。</p>
+    <h1>用户与权限</h1>
+    <p class="lead">全站必须登录。Admin 管理规则与密钥环境；Editor 生成并提交；Reviewer 审核。密码加密存储，不会显示在页面上。</p>
     <section class="panel">
-      <div class="field"><label>启用登录口令</label>
-        <div class="chips"><button class="chip ${state.me.authRequired ? 'on' : ''}" onclick="toggleAuth()">开启后必须登录</button></div>
-      </div>
-      <p class="hint">AI Key 只能写在 Render 环境变量 AI_API_KEY，或管理员在下面填写。前端看不到完整密钥。</p>
       ${isAdmin() ? `
-        <div class="field"><label>API Base</label><input id="set_base" value="${esc((state.settings && state.settings.apiBaseUrl) || '')}" placeholder="https://api.openai.com/v1"></div>
-        <div class="field"><label>模型</label><input id="set_model" value="${esc((state.settings && state.settings.model) || 'gpt-4o-mini')}"></div>
-        <div class="field"><label>API Key（只在服务器保存）</label><input id="set_key" type="password" placeholder="留空表示不修改"></div>
-        <div class="actions"><button class="btn" onclick="saveAiSettings()">保存接口</button></div>
-      ` : '<p class="hint">当前角色不能配置接口。</p>'}
+        <div class="row">
+          <div class="field"><label>用户名</label><input id="nu_name"></div>
+          <div class="field"><label>角色</label><input id="nu_role" placeholder="admin / editor / reviewer"></div>
+        </div>
+        <div class="field"><label>密码</label><input id="nu_password" type="password"></div>
+        <div class="actions"><button class="btn" onclick="createUser()">添加用户</button></div>
+      ` : '<p class="hint">仅管理员可添加用户。</p>'}
     </section>
   `;
 }
 
-async function toggleAuth() {
-  if (!isAdmin()) { toast('仅管理员', true); return; }
+async function createUser() {
+  if (!isAdmin()) return;
   try {
-    await post('/api/users', { authRequired: !state.me.authRequired });
-    state.me = await api('/api/me');
-    draw();
+    await post('/api/users', { user: { name: val('nu_name'), role: val('nu_role') || 'editor', password: val('nu_password') } });
+    toast('用户已保存');
   } catch (e) { toast(e.message, true); }
 }
 
-async function saveAiSettings() {
-  if (!isAdmin()) return;
-  const body = { apiBaseUrl: val('set_base'), model: val('set_model') };
-  if (val('set_key')) body.apiKey = val('set_key');
+function viewAiSettings() {
+  const ai = state.me.ai || {};
+  return `
+    <h1>AI 设置</h1>
+    <p class="lead">密钥只能放在 Render 环境变量，不会出现在浏览器或接口响应里。</p>
+    <section class="panel">
+      <p>状态：<strong>${ai.configured ? '已配置' : '未配置'}</strong></p>
+      <p>来源：${esc(ai.source || 'none')} · Provider：${esc(ai.provider || '-')} · 模型：${esc(ai.model || '-')}</p>
+      <p>图片模型：${ai.imageConfigured ? '已配置' : '未配置（可使用快速模板海报）'}</p>
+      <h2 style="margin-top:16px">Render 环境变量</h2>
+      <p class="hint">AI_PROVIDER=openai 或 gemini<br>AI_API_KEY=你的密钥<br>AI_MODEL=gpt-4o-mini 或 gemini-2.0-flash<br>IMAGE_API_KEY=可选，用于 AI 海报<br>DATABASE_URL=Render PostgreSQL 连接串（生产必须）<br>ADMIN_PASSWORD=首次管理员密码</p>
+    </section>
+  `;
+}
+
+function viewLogs() {
+  return `
+    <h1>系统日志</h1>
+    <p class="lead">记录任务类型、模型与状态，不会记录 API Key。</p>
+    <div class="actions"><button class="btn ghost" onclick="loadLogs()">刷新</button></div>
+    <div id="logBox" class="empty">点击刷新。</div>
+  `;
+}
+
+async function loadLogs() {
   try {
-    const res = await post('/api/settings', body);
-    state.settings = res.settings;
-    state.me = await api('/api/me');
-    toast('接口已在服务器保存');
-    paintChrome();
+    const res = await api('/api/logs');
+    document.getElementById('logBox').innerHTML = (res.items || []).map((l) => `
+      <div class="item"><div><h3>${esc(l.kind)} · ${esc(l.status)}</h3>
+      <p>${esc(l.user_name || '')} · ${esc(l.model || '')} · ${esc(l.intent || '')}</p>
+      <div class="meta">${esc(l.createdAt || '')}</div></div></div>
+    `).join('') || '<div class="empty">暂无日志</div>';
   } catch (e) { toast(e.message, true); }
+}
+
+function viewLibrary() {
+  const items = state.contents || [];
+  return `
+    <h1>内容库</h1>
+    <p class="lead">已生成和进入审核流程的全部内容。状态未经人工批准不会变成 Scheduled 或 Published。</p>
+    ${items.length ? items.slice().reverse().map((it) => `
+      <div class="item">
+        <div>
+          <h3>${esc(it.title || '未命名')}</h3>
+          <p>${esc(it.audience || '')} · ${esc(it.purpose || '')}</p>
+          <div class="meta"><span class="status ${esc(it.status)}">${esc(it.status)}</span> · ${esc(it.publishAt || it.createdAt || '')}</div>
+        </div>
+        <div class="actions"><button class="btn ghost small" onclick="openContent('${it.id}')">看</button></div>
+      </div>
+    `).join('') : '<div class="empty">还没有内容。请先在 AI 助理里生成并保存。</div>'}
+  `;
+}
+
+function viewHistory() {
+  const feed = (state.feed || []).slice().reverse();
+  const pub = (state.contents || []).filter((c) => c.status === 'Published');
+  return `
+    <h1>历史内容</h1>
+    <p class="lead">用于重复检查。把已发布小红书喂进来，新选题才会避开旧切口。</p>
+    <div class="actions"><button class="btn ghost" onclick="go('feed')">喂入旧帖</button></div>
+    <h2>已发布</h2>
+    ${pub.map((it) => `<div class="item"><div><h3>${esc(it.title)}</h3><div class="meta">${esc(it.publishAt || '')}</div></div></div>`).join('') || '<div class="empty">还没有 Published 内容。</div>'}
+    <h2 style="margin-top:20px">已喂旧帖</h2>
+    ${feed.map((it) => `<div class="item"><div><h3>${esc((it.caption || '').split('\\n')[0].slice(0, 40) || '旧帖')}</h3></div></div>`).join('') || '<div class="empty">还没有喂帖。</div>'}
+  `;
 }
 
 function viewPromptTools() {

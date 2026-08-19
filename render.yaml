@@ -9,9 +9,15 @@ services:
     envVars:
       - key: DATA_DIR
         value: /app/data
+      - key: AI_PROVIDER
+        value: openai
       - key: AI_API_KEY
         sync: false
-      - key: AI_API_BASE
-        value: https://api.openai.com/v1
       - key: AI_MODEL
         value: gpt-4o-mini
+      - key: IMAGE_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false

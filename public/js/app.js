@@ -33,10 +33,18 @@ const RULE_FIELDS = [
 async function api(url, options = {}) {
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     ...options
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || '请求失败');
+  let data = {};
+  try { data = await res.json(); } catch (e) { data = {}; }
+  if (!res.ok) {
+    const err = new Error(data.error || '请求失败');
+    err.status = res.status;
+    err.code = data.code;
+    err.body = data;
+    throw err;
+  }
   return data;
 }
 const post = (url, body) => api(url, { method: 'POST', body: JSON.stringify(body) });
@@ -309,7 +317,7 @@ async function boot() {
     toast(e.message, true);
   }
   const asked = new URLSearchParams(location.search).get('p');
-  const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce'];
+  const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce', 'library', 'history', 'aisettings', 'logs'];
   page = allowed.includes(asked) ? asked : 'chat';
   draw();
 }

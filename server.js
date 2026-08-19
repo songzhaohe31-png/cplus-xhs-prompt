@@ -4,6 +4,7 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const { callChat, AiError, resolveAiConfig } = require('./lib/ai');
+const { createAuth } = require('./lib/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3210;
@@ -34,6 +35,12 @@ function writeData(filename, data) {
   const tmp = filePath + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
   fs.renameSync(tmp, filePath);
+  if (global.__cplusPg) {
+    global.__cplusPg.query(
+      'INSERT INTO kv(key, value, updated_at) VALUES($1,$2,NOW()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()',
+      [filename, data]
+    ).catch((e) => console.error('[db] kv write failed', e.message));
+  }
   return data;
 }
 
@@ -377,6 +384,19 @@ app.post('/api/rules/reset', (req, res) => {
   res.json({ success: true, rules });
 });
 
+const auth = createAuth({ readData, writeData, ensureDataFile, newId });
+
+app.use((req, res, next) => {
+  if (req.path === '/healthz') return next();
+  if (!req.path.startsWith('/api')) return next();
+  if (req.path === '/api/auth/login' && req.method === 'POST') return next();
+  req.user = auth.currentUser(req);
+  if (!auth.isAuthed(req.user)) {
+    return res.status(401).json({ error: '请先登录', code: 'UNAUTHENTICATED' });
+  }
+  next();
+});
+
 // --- Settings ---
 app.get('/api/settings', (req, res) => {
   const settings = readData('settings.json');
@@ -392,15 +412,17 @@ app.get('/api/settings', (req, res) => {
 });
 
 app.post('/api/settings', (req, res) => {
+  if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: '仅管理员可改设置' });
   const current = readData('settings.json');
-  const updates = req.body;
-  // Don't overwrite API key with masked value
-  if (updates.apiKey && updates.apiKey.includes('****')) {
-    delete updates.apiKey;
-  }
+  const updates = req.body || {};
+  delete updates.apiKey;
   const newSettings = { ...current, ...updates };
   writeData('settings.json', newSettings);
-  res.json({ success: true, settings: { ...newSettings, apiKey: newSettings.apiKey ? newSettings.apiKey.substring(0, 4) + '****' + newSettings.apiKey.substring(newSettings.apiKey.length - 4) : '', apiKeyConfigured: !!newSettings.apiKey } });
+  const cfg = resolveAiConfig(newSettings);
+  res.json({
+    success: true,
+    settings: { ...newSettings, apiKey: '', apiKeyConfigured: cfg.configured, aiSource: cfg.source, model: cfg.model }
+  });
 });
 
 // --- Rules ---
@@ -410,6 +432,7 @@ app.get('/api/rules', (req, res) => {
 });
 
 app.post('/api/rules', (req, res) => {
+  if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: '仅管理员可改账号规则' });
   const rules = { ...req.body, updatedAt: new Date().toISOString() };
   writeData('rules.json', rules);
   res.json({ success: true, rules });
@@ -813,7 +836,8 @@ require('./lib/workbench-api')({
   newId,
   buildRulesPrompt,
   buildProduceBrief,
-  callAI
+  callAI,
+  auth
 });
 
 app.get('/healthz', (req, res) => {
@@ -826,6 +850,14 @@ app.use((req, res, next) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
+  try {
+    const { attachPostgres } = require('./lib/pg');
+    const db = await attachPostgres({ DATA_DIR, writeData });
+    global.__cplusDb = db;
+    console.log('[db]', db.enabled ? 'PostgreSQL connected' : 'JSON fallback');
+  } catch (e) {
+    console.error('[db] init failed', e.message);
+  }
   console.log(`XHS Content Agent running at http://localhost:${PORT}`);
 });

@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CPLUS 新媒体运营工作台</title>
-  <link rel="stylesheet" href="/css/style.css?v=12">
-  <link rel="stylesheet" href="/css/theme.css?v=12">
+  <link rel="stylesheet" href="/css/style.css?v=13">
+  <link rel="stylesheet" href="/css/theme.css?v=13">
 </head>
 <body>
   <div class="app">
@@ -19,22 +19,27 @@
       </div>
       <nav class="nav" id="steps">
         <p class="nav-label">工作</p>
-        <button type="button" data-page="chat" onclick="go('chat')">对话</button>
-        <button type="button" data-page="generate" onclick="go('generate')">生成器</button>
-        <button type="button" data-page="calendar" onclick="go('calendar')">日历</button>
-        <button type="button" data-page="review" onclick="go('review')">复盘</button>
+        <button type="button" data-page="chat" onclick="go('chat')">AI 助理</button>
+        <button type="button" data-page="calendar" onclick="go('calendar')">内容日历</button>
+        <button type="button" data-page="library" onclick="go('library')">内容库</button>
+        <button type="button" data-page="review" onclick="go('review')">数据复盘</button>
         <p class="nav-label">资料</p>
-        <button type="button" data-page="knowledge" onclick="go('knowledge')">知识库</button>
-        <button type="button" data-page="feed" onclick="go('feed')">喂帖</button>
-        <button type="button" data-page="style" onclick="go('style')">风格</button>
-        <button type="button" data-page="materials" onclick="go('materials')">素材</button>
+        <button type="button" data-page="knowledge" onclick="go('knowledge')">企业知识库</button>
+        <button type="button" data-page="history" onclick="go('history')">历史内容</button>
+        <button type="button" data-page="agent" onclick="go('agent')">品牌及内容规则</button>
         <p class="nav-label">系统</p>
-        <button type="button" data-page="agent" onclick="go('agent')">Agent 规则</button>
-        <button type="button" data-page="rules" onclick="go('rules')">账号规则</button>
-        <button type="button" data-page="prompt" onclick="go('prompt')">Prompt 模板</button>
-        <button type="button" data-page="produce" onclick="go('produce')">一句话出稿</button>
-        <button type="button" data-page="archive" onclick="go('archive')">存档</button>
-        <button type="button" data-page="users" onclick="go('users')">权限</button>
+        <button type="button" data-page="users" onclick="go('users')">用户与权限</button>
+        <button type="button" data-page="aisettings" onclick="go('aisettings')">AI 设置</button>
+        <button type="button" data-page="logs" onclick="go('logs')">系统日志</button>
+        <p class="nav-label admin-only">高级</p>
+        <button type="button" class="admin-only" data-page="generate" onclick="go('generate')">海报工作台</button>
+        <button type="button" class="admin-only" data-page="prompt" onclick="go('prompt')">Prompt 模板</button>
+        <button type="button" class="admin-only" data-page="produce" onclick="go('produce')">旧版出稿</button>
+        <button type="button" class="admin-only" data-page="materials" onclick="go('materials')">素材</button>
+        <button type="button" class="admin-only" data-page="rules" onclick="go('rules')">账号规则</button>
+        <button type="button" class="admin-only" data-page="feed" onclick="go('feed')">喂帖</button>
+        <button type="button" class="admin-only" data-page="style" onclick="go('style')">风格</button>
+        <button type="button" class="admin-only" data-page="archive" onclick="go('archive')">存档</button>
       </nav>
       <div class="side-foot" id="sideFoot"></div>
     </aside>
@@ -63,8 +68,8 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="/js/app.js?v=12"></script>
-  <script src="/js/workbench.js?v=12"></script>
+  <script src="/js/app.js?v=13"></script>
+  <script src="/js/workbench.js?v=13"></script>
   <script>boot();</script>
 </body>
 </html>
