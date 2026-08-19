@@ -4,8 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CPLUS 新媒体运营工作台</title>
-  <link rel="stylesheet" href="/css/style.css?v=13">
-  <link rel="stylesheet" href="/css/theme.css?v=13">
+  <meta http-equiv="Cache-Control" content="no-store">
+  <link rel="stylesheet" href="/css/style.css?v=15">
+  <link rel="stylesheet" href="/css/theme.css?v=15">
 </head>
 <body>
   <div class="app">
@@ -28,7 +29,7 @@
         <button type="button" data-page="history" onclick="go('history')">历史内容</button>
         <button type="button" data-page="agent" onclick="go('agent')">品牌及内容规则</button>
         <p class="nav-label">系统</p>
-        <button type="button" data-page="users" onclick="go('users')">用户与权限</button>
+        <button type="button" data-page="users" onclick="go('users')" class="admin-only" style="display:none">用户与权限</button>
         <button type="button" data-page="aisettings" onclick="go('aisettings')">AI 设置</button>
         <button type="button" data-page="logs" onclick="go('logs')">系统日志</button>
         <p class="nav-label admin-only">高级</p>
@@ -68,8 +69,8 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="/js/app.js?v=14"></script>
-  <script src="/js/workbench.js?v=14"></script>
+  <script src="/js/app.js?v=15"></script>
+  <script src="/js/workbench.js?v=15"></script>
   <script>boot();</script>
 </body>
 </html>

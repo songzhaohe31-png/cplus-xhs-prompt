@@ -869,18 +869,8 @@ async function applySuggestion(id) {
 
 function viewUsers() {
   return `
-    <h1>用户与权限</h1>
-    <p class="lead">全站必须登录。Admin 管理规则与密钥环境；Editor 生成并提交；Reviewer 审核。密码加密存储，不会显示在页面上。</p>
-    <section class="panel">
-      ${isAdmin() ? `
-        <div class="row">
-          <div class="field"><label>用户名</label><input id="nu_name"></div>
-          <div class="field"><label>角色</label><input id="nu_role" placeholder="admin / editor / reviewer"></div>
-        </div>
-        <div class="field"><label>密码</label><input id="nu_password" type="password"></div>
-        <div class="actions"><button class="btn" onclick="createUser()">添加用户</button></div>
-      ` : '<p class="hint">仅管理员可添加用户。</p>'}
-    </section>
+    <h1>权限说明</h1>
+    <p class="lead">当前站点无需登录，打开即可使用。不再要求用户名和密码。</p>
   `;
 }
 
