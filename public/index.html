@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CPLUS 新媒体运营工作台</title>
+  <title>CPLUS 新媒体运营助手</title>
   <meta http-equiv="Cache-Control" content="no-store">
-  <link rel="stylesheet" href="/css/style.css?v=15">
-  <link rel="stylesheet" href="/css/theme.css?v=15">
+  <link rel="stylesheet" href="/css/style.css?v=16">
+  <link rel="stylesheet" href="/css/theme.css?v=16">
 </head>
 <body>
   <div class="app">
@@ -15,7 +15,7 @@
         <img class="logo" src="/img/cplus-mark.png" alt="CPLUS GROUP">
         <div class="brand-text">
           <strong>CPLUS</strong>
-          <span>运营工作台</span>
+          <span>新媒体助手</span>
         </div>
       </div>
       <nav class="nav" id="steps">
@@ -25,22 +25,8 @@
         <button type="button" data-page="library" onclick="go('library')">内容库</button>
         <button type="button" data-page="review" onclick="go('review')">数据复盘</button>
         <p class="nav-label">资料</p>
-        <button type="button" data-page="knowledge" onclick="go('knowledge')">企业知识库</button>
+        <button type="button" data-page="knowledge" onclick="go('knowledge')">资料库</button>
         <button type="button" data-page="history" onclick="go('history')">历史内容</button>
-        <button type="button" data-page="agent" onclick="go('agent')">品牌及内容规则</button>
-        <p class="nav-label">系统</p>
-        <button type="button" data-page="users" onclick="go('users')" class="admin-only" style="display:none">用户与权限</button>
-        <button type="button" data-page="aisettings" onclick="go('aisettings')">AI 设置</button>
-        <button type="button" data-page="logs" onclick="go('logs')">系统日志</button>
-        <p class="nav-label admin-only">高级</p>
-        <button type="button" class="admin-only" data-page="generate" onclick="go('generate')">海报工作台</button>
-        <button type="button" class="admin-only" data-page="prompt" onclick="go('prompt')">Prompt 模板</button>
-        <button type="button" class="admin-only" data-page="produce" onclick="go('produce')">旧版出稿</button>
-        <button type="button" class="admin-only" data-page="materials" onclick="go('materials')">素材</button>
-        <button type="button" class="admin-only" data-page="rules" onclick="go('rules')">账号规则</button>
-        <button type="button" class="admin-only" data-page="feed" onclick="go('feed')">喂帖</button>
-        <button type="button" class="admin-only" data-page="style" onclick="go('style')">风格</button>
-        <button type="button" class="admin-only" data-page="archive" onclick="go('archive')">存档</button>
       </nav>
       <div class="side-foot" id="sideFoot"></div>
     </aside>
@@ -58,8 +44,8 @@
   </div>
 
   <div class="savebar hidden" id="savebar">
-    <span id="saveState">规则已保存</span>
-    <button type="button" class="btn" onclick="saveRules(true)">保存规则</button>
+    <span id="saveState"></span>
+    <button type="button" class="btn hidden" onclick="saveRules(true)">保存</button>
   </div>
 
   <div class="toasts" id="toasts"></div>
@@ -69,8 +55,8 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="/js/app.js?v=15"></script>
-  <script src="/js/workbench.js?v=15"></script>
+  <script src="/js/app.js?v=16"></script>
+  <script src="/js/workbench.js?v=16"></script>
   <script>boot();</script>
 </body>
 </html>

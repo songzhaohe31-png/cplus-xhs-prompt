@@ -5,6 +5,7 @@ const http = require('http');
 const https = require('https');
 const { callChat, AiError, resolveAiConfig } = require('./lib/ai');
 const { createAuth } = require('./lib/auth');
+const { attachWorkspace, isBlocked, limited, clientIp } = require('./lib/workspace');
 
 const app = express();
 const PORT = process.env.PORT || 3210;
@@ -367,6 +368,29 @@ ${feedback || ''}
 
 // ==================== API Routes ====================
 
+const auth = createAuth({ readData, writeData, ensureDataFile, newId });
+
+app.use((req, res, next) => {
+  if (req.path === '/healthz') return next();
+  if (!req.path.startsWith('/api')) return next();
+  attachWorkspace(req, res);
+  req.user = { id: 'public', name: 'CPLUS User', role: 'public', workspaceId: req.workspaceId };
+  if (isBlocked(req.originalUrl)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    const ip = clientIp(req);
+    if (limited('w:' + req.workspaceId, 80, 10 * 60 * 1000) || limited('ip:' + ip, 120, 10 * 60 * 1000)) {
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试。' });
+    }
+  }
+  next();
+});
+
+function scopedItems(req, items) {
+  return (items || []).filter((i) => i && i.workspaceId === req.workspaceId);
+}
+
 app.post('/api/prompt/schedule', (req, res) => {
   const rules = readData('rules.json');
   const { materials, weeks, postsPerWeek } = req.body || {};
@@ -395,15 +419,6 @@ app.post('/api/rules/reset', (req, res) => {
   const rules = { ...DEFAULT_RULES, updatedAt: new Date().toISOString() };
   writeData('rules.json', rules);
   res.json({ success: true, rules });
-});
-
-const auth = createAuth({ readData, writeData, ensureDataFile, newId });
-
-app.use((req, res, next) => {
-  if (req.path === '/healthz') return next();
-  if (!req.path.startsWith('/api')) return next();
-  req.user = auth.currentUser(req);
-  next();
 });
 
 // --- Settings ---
@@ -454,7 +469,7 @@ app.get('/api/rules/prompt', (req, res) => {
 
 // --- Materials ---
 app.get('/api/materials', (req, res) => {
-  res.json({ items: lists.materials.items });
+  res.json({ items: scopedItems(req, lists.materials.items) });
 });
 
 app.post('/api/materials', (req, res) => {
@@ -470,7 +485,8 @@ app.post('/api/materials', (req, res) => {
       summary: raw.summary || '',
       keyPoints: raw.keyPoints || '',
       snippet: raw.snippet || '',
-      createdAt: raw.createdAt || new Date().toISOString()
+      createdAt: raw.createdAt || new Date().toISOString(),
+      workspaceId: req.workspaceId
     };
     lists.materials.items.push(item);
     added.push(item);
@@ -502,7 +518,7 @@ app.delete('/api/materials/:id', (req, res) => {
 
 // --- Schedules ---
 app.get('/api/schedules', (req, res) => {
-  res.json({ items: lists.schedules.items });
+  res.json({ items: scopedItems(req, lists.schedules.items) });
 });
 
 app.post('/api/schedules', (req, res) => {
@@ -510,7 +526,8 @@ app.post('/api/schedules', (req, res) => {
     id: newId(),
     name: req.body.name || '',
     content: req.body.content || '',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    workspaceId: req.workspaceId
   };
   lists.schedules.items.push(item);
   persistList('schedules');
@@ -525,7 +542,7 @@ app.delete('/api/schedules/:id', (req, res) => {
 
 // --- Posts ---
 app.get('/api/posts', (req, res) => {
-  res.json({ items: lists.posts.items });
+  res.json({ items: scopedItems(req, lists.posts.items) });
 });
 
 app.post('/api/posts', (req, res) => {
@@ -533,7 +550,8 @@ app.post('/api/posts', (req, res) => {
     id: newId(),
     title: req.body.title || '',
     content: req.body.content || '',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    workspaceId: req.workspaceId
   };
   lists.posts.items.push(item);
   persistList('posts');
@@ -695,9 +713,10 @@ ${feedback || ''}
 
 // --- Feed: real XHS posters + captions ---
 app.get('/api/feed', (req, res) => {
+  const items = scopedItems(req, lists.feed.items).map(withImageUrls);
   res.json({
-    items: lists.feed.items.map(withImageUrls),
-    style: analyzeFeed(lists.feed.items)
+    items,
+    style: analyzeFeed(items)
   });
 });
 
@@ -728,17 +747,19 @@ app.post('/api/feed', (req, res) => {
       note: raw.note || '',
       postedAt: raw.postedAt || '',
       createdAt: raw.createdAt || new Date().toISOString(),
+      workspaceId: req.workspaceId,
       images: images.map((img) => ({ name: img.name, mime: img.mime, url: img.url }))
     };
     lists.feed.items.push(item);
     added.push(withImageUrls(item));
   });
   persistList('feed');
+  const mine = scopedItems(req, lists.feed.items).map(withImageUrls);
   res.json({
     success: true,
     item: added[0] || null,
-    items: lists.feed.items.map(withImageUrls),
-    style: analyzeFeed(lists.feed.items)
+    items: mine,
+    style: analyzeFeed(mine)
   });
 });
 

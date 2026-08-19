@@ -276,20 +276,18 @@ async function go(name) {
 
 async function boot() {
   try {
-    const [rules, mats, sch, posts, set, feed] = await Promise.all([
-      api('/api/rules'),
-      api('/api/materials'),
-      api('/api/schedules'),
-      api('/api/posts'),
-      api('/api/settings'),
-      api('/api/feed')
+    const [mats, sch, posts, feed] = await Promise.all([
+      api('/api/materials').catch(() => ({ items: [] })),
+      api('/api/schedules').catch(() => ({ items: [] })),
+      api('/api/posts').catch(() => ({ items: [] })),
+      api('/api/feed').catch(() => ({ items: [], style: null }))
     ]);
-    state.rules = rules;
+    state.rules = {};
     state.materials = mats.items || [];
     state.schedules = sch.items || [];
     state.posts = posts.items || [];
-    state.settings = set;
-    lastSavedAt = rules.updatedAt || null;
+    state.settings = {};
+    lastSavedAt = null;
     const serverFeed = feed.items || [];
     const merged = await hydratePreviews(mergeById(serverFeed, localFeed()));
     rememberFeed(merged);
@@ -317,7 +315,7 @@ async function boot() {
     toast(e.message, true);
   }
   const asked = new URLSearchParams(location.search).get('p');
-  const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce', 'library', 'history', 'aisettings', 'logs'];
+  const allowed = ['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
   page = allowed.includes(asked) ? asked : 'chat';
   draw();
 }

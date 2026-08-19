@@ -3,7 +3,7 @@ state.knowledge = state.knowledge || [];
 state.contents = state.contents || [];
 state.metrics = state.metrics || [];
 state.suggestions = state.suggestions || [];
-state.me = state.me || { user: { id: 'open', name: 'CPLUS', role: 'admin' }, ai: { configured: false } };
+state.me = state.me || { mode: 'public', serviceAvailable: true };
 state.chatLog = state.chatLog || [];
 state.calCursor = state.calCursor || new Date();
 state.calMode = state.calMode || 'month';
@@ -19,39 +19,57 @@ const draft = {
   businessCategory: '', publishAt: '', owner: '', sourcesText: '', id: ''
 };
 
+async function exportWorkspace() {
+  try {
+    const data = await api('/api/workspace/export');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    a.download = 'cplus-workspace.json';
+    a.click();
+  } catch (e) { toast('导出失败，请稍后再试。', true); }
+}
+
+async function importWorkspace(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    await post('/api/workspace/import', data);
+    toast('工作区已导入');
+    location.reload();
+  } catch (e) { toast('导入失败，请检查文件。', true); }
+}
+
 function toggleSide() {
   document.getElementById('side').classList.toggle('open');
 }
 
-function isAdmin() { return true; }
-function isReviewer() { return ['admin', 'reviewer'].includes((state.me.user || {}).role); }
+function isAdmin() { return false; }
+function isReviewer() { return true; }
 
 function paintChrome() {
-  const ai = state.me.ai || {};
   const foot = document.getElementById('sideFoot');
   if (foot) {
-    foot.innerHTML = `<div>AI：${ai.configured ? esc(ai.provider || '') + ' · ' + esc(ai.model || '') : '未配置'}</div>`;
+    foot.innerHTML = `<div class="actions" style="flex-direction:column;align-items:stretch">
+      <button class="btn ghost small" onclick="exportWorkspace()">导出工作区</button>
+      <label class="btn quiet small" style="text-align:center">导入工作区<input type="file" accept="application/json" hidden onchange="importWorkspace(event)"></label>
+    </div>`;
   }
   const top = document.getElementById('topActions');
   if (top) top.innerHTML = '';
-  document.querySelectorAll('.admin-only').forEach((el) => {
-    el.style.display = '';
-  });
 }
 
 async function bootWorkbench() {
   try {
-    const [me, agent, knowledge, contents, metrics, suggestions] = await Promise.all([
+    const [me, knowledge, contents, metrics] = await Promise.all([
       api('/api/me'),
-      api('/api/agent'),
       api('/api/knowledge'),
       api('/api/contents'),
-      api('/api/metrics'),
-      api('/api/suggestions')
+      api('/api/metrics')
     ]);
     state.me = me;
     state.authed = true;
-    state.agent = agent;
+    state.agent = {};
     state.knowledge = knowledge.items || [];
     state.contents = contents.items || [];
     state.metrics = metrics.items || [];
@@ -72,18 +90,12 @@ draw = function () {
   const root = document.getElementById('stage');
   const extra = {
     chat: viewChat,
-    agent: viewAgent,
     knowledge: viewKnowledge,
     calendar: viewCalendar,
     generate: viewGenerate,
     review: viewReview,
-    users: viewUsers,
-    prompt: viewPromptTools,
-    materials: viewMaterialsPage,
     library: viewLibrary,
-    history: viewHistory,
-    aisettings: viewAiSettings,
-    logs: viewLogs
+    history: viewHistory
   };
   if (extra[page]) {
     showSavebar(false);
@@ -97,7 +109,7 @@ draw = function () {
 
 const _go = go;
 go = async function (name) {
-  const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce', 'library', 'history', 'aisettings', 'logs'];
+  const allowed = ['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
   if (!allowed.includes(name)) name = 'chat';
   await _go(name);
 };
@@ -106,7 +118,7 @@ const _boot = boot;
 boot = async function () {
   await bootWorkbench();
   await _boot();
-  const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce', 'library', 'history', 'aisettings', 'logs'];
+  const allowed = ['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
   if (!allowed.includes(page)) page = 'chat';
   draw();
 };
@@ -122,9 +134,9 @@ function viewChat() {
     </div>
   `).join('');
   return `
-    <h1>CPLUS跨境合规新媒体运营Agent</h1>
-    <p class="lead">输入一句指令，直接得到排期或成稿。不会再给你一段要复制的 Prompt。</p>
-    ${ai.configured ? '' : `<div class="warn">AI 尚未配置。管理员请到「AI 设置」按 Render 环境变量说明接入。系统不会假装已经生成内容。</div>`}
+    <h1>CPLUS新媒体运营助手</h1>
+    <p class="lead">输入一句话，快速生成内容排期、小红书文案和海报方案。</p>
+    ${state.me && state.me.serviceAvailable === false ? `<div class="warn">AI服务暂时不可用，请稍后再试。</div>` : ''}
     <div class="quick">
       ${[
         ['生成未来4周的小红书内容排期，每周3篇，重点推广香港公司注册、银行开户和MSO牌照。', '生成未来4周排期'],
@@ -182,8 +194,8 @@ async function sendChat() {
   if (chatBusy) return;
   const message = val('chatMsg');
   if (!message) { toast('先写一句指令', true); return; }
-  if (!(state.me.ai && state.me.ai.configured)) {
-    toast('AI 未配置，不能生成内容', true);
+  if (state.me && state.me.serviceAvailable === false) {
+    toast('AI服务暂时不可用，请稍后再试。', true);
     return;
   }
   chatBusy = true;
@@ -217,9 +229,8 @@ async function sendChat() {
   } catch (e) {
     if (e.name === 'AbortError') toast('已取消');
     else {
-      const extra = e.body && e.body.setup && e.body.setup.hint ? ' ' + e.body.setup.hint : '';
-      toast(e.message + extra, true);
-      state.chatLog.push({ role: 'bot', text: e.message + extra, time: whenFull(new Date().toISOString()) });
+      toast('AI服务暂时不可用，请稍后再试。', true);
+      state.chatLog.push({ role: 'bot', text: 'AI服务暂时不可用，请稍后再试。', time: whenFull(new Date().toISOString()) });
     }
   } finally {
     chatBusy = false;
@@ -344,8 +355,8 @@ async function saveAgent() {
 
 function viewKnowledge() {
   return `
-    <h1>企业知识库</h1>
-    <p class="lead">上传画册、合规指引、公众号和网站摘录。生成时按指令检索摘录，并记下资料来源。</p>
+    <h1>资料库</h1>
+    <p class="lead">上传文件或粘贴文章，生成内容时会参考这些资料。</p>
     <div class="kb-grid">
       <section class="panel">
         <h2>上传资料</h2>
@@ -941,7 +952,7 @@ function viewHistory() {
   return `
     <h1>历史内容</h1>
     <p class="lead">用于重复检查。把已发布小红书喂进来，新选题才会避开旧切口。</p>
-    <div class="actions"><button class="btn ghost" onclick="go('feed')">喂入旧帖</button></div>
+    <p class="hint">把已发布文案保存在内容库中，即可用于避免重复选题。</p>
     <h2>已发布</h2>
     ${pub.map((it) => `<div class="item"><div><h3>${esc(it.title)}</h3><div class="meta">${esc(it.publishAt || '')}</div></div></div>`).join('') || '<div class="empty">还没有 Published 内容。</div>'}
     <h2 style="margin-top:20px">已喂旧帖</h2>
