@@ -12,7 +12,8 @@ let promptKind = 'schedule';
 let lastPrompt = '';
 const draft = {
   title: '', subtitle: '', body: '', cta: '', hashtags: '', posterNotes: '', pendingConfirm: '',
-  topic: '', businessCategory: '', publishAt: '', owner: '', sourcesText: '', id: ''
+  topic: '', audience: '', purpose: '', riskNote: '',
+  businessCategory: '', publishAt: '', owner: '', sourcesText: '', id: ''
 };
 
 function toggleSide() {
@@ -142,8 +143,8 @@ function viewChat() {
     </div>
   `).join('');
   return `
-    <h1>CPLUS 新媒体运营助理</h1>
-    <p class="lead">说一句即可。系统会自动带上品牌规则、知识库和历史旧帖。普通用户不必再填长 Prompt。</p>
+    <h1>CPLUS跨境合规新媒体运营Agent</h1>
+    <p class="lead">全球业务，合规先行。说一句即可得到排期、成稿和海报方案。系统会自动带上品牌规则、知识库和历史内容。</p>
     <div class="quick">
       ${[
         ['生成下个月的内容排期。', '生成月度排期'],
@@ -230,19 +231,25 @@ function parseDraftFromText(text) {
     const m = String(text || '').match(re);
     return m ? m[1].trim() : '';
   };
+  draft.topic = pick('内容主题') || draft.topic;
+  draft.audience = pick('目标客户') || draft.audience;
+  draft.purpose = pick('内容目的') || draft.purpose;
   draft.title = pick('封面标题') || draft.title;
-  draft.subtitle = pick('副标题/三个重点') || pick('副标题') || draft.subtitle;
-  draft.body = pick('笔记正文') || draft.body;
+  draft.subtitle = pick('封面副标题或3个重点') || pick('副标题/三个重点') || pick('副标题') || draft.subtitle;
+  draft.body = pick('小红书正文') || pick('笔记正文') || draft.body;
   draft.cta = pick('CTA') || (state.agent && state.agent.fixedCta) || '';
   draft.hashtags = pick('Hashtag') || (state.agent && state.agent.fixedHashtags) || '';
   draft.posterNotes = pick('海报制作说明') || '';
-  draft.pendingConfirm = pick('待人工确认事项') || '';
-  draft.sourcesText = pick('参考资料') || '';
+  draft.pendingConfirm = pick('需要人工确认的资料') || pick('待人工确认事项') || '';
+  draft.sourcesText = pick('参考资料及链接') || pick('参考资料') || '';
+  draft.riskNote = pick('合规风险提示') || '';
 }
 
 function viewAgent() {
   const a = state.agent || {};
   const fields = [
+    ['roleName', '角色名称'],
+    ['slogan', '品牌主张'],
     ['brandBackground', '品牌背景'],
     ['accountPosition', '账号定位'],
     ['targetAudience', '目标客户'],
@@ -253,11 +260,12 @@ function viewAgent() {
     ['bannedWords', '禁用词'],
     ['fixedCta', '固定 CTA'],
     ['fixedHashtags', '固定 Hashtag'],
-    ['officialSources', '官方资料来源']
+    ['officialSources', '官方资料来源'],
+    ['contentMix', '内容配比']
   ];
   return `
     <h1>Agent 规则库</h1>
-    <p class="lead">管理员维护。普通用户对话时自动加载，不必每次重写。</p>
+    <p class="lead">已内置「CPLUS跨境合规新媒体运营Agent」完整剧本。下面这些是管理员可改的覆盖项。普通用户对话时自动加载，不必重写长 Prompt。</p>
     <section class="panel">
       ${fields.map(([k, lab]) => `
         <div class="field">
@@ -275,7 +283,7 @@ function viewAgent() {
 async function saveAgent() {
   if (!isAdmin()) { toast('仅管理员可改系统规则', true); return; }
   const body = {};
-  ['brandBackground', 'accountPosition', 'targetAudience', 'serviceScope', 'copyRules', 'imageRules', 'complianceRules', 'bannedWords', 'fixedCta', 'fixedHashtags', 'officialSources'].forEach((k) => {
+  ['roleName', 'slogan', 'brandBackground', 'accountPosition', 'targetAudience', 'serviceScope', 'copyRules', 'imageRules', 'complianceRules', 'bannedWords', 'fixedCta', 'fixedHashtags', 'officialSources', 'contentMix'].forEach((k) => {
     body[k] = val('ag_' + k);
   });
   try {
@@ -377,8 +385,13 @@ function viewGenerate() {
     <p class="lead">每篇绑定文案和海报。可改写字段、导出、写入日历。须人工批准后才能排期发布。</p>
     <div class="gen-grid">
       <section class="panel">
+        <div class="field"><label>内容主题</label><input id="d_topic" value="${esc(draft.topic)}"></div>
+        <div class="row">
+          <div class="field"><label>目标客户</label><input id="d_audience" value="${esc(draft.audience)}"></div>
+          <div class="field"><label>内容目的</label><input id="d_purpose" value="${esc(draft.purpose)}" placeholder="品牌曝光／知识教育／获取咨询／服务转化"></div>
+        </div>
         <div class="field"><label>封面标题</label><input id="d_title" value="${esc(draft.title)}"></div>
-        <div class="field"><label>副标题 / 三个重点</label><textarea id="d_subtitle" rows="3">${esc(draft.subtitle)}</textarea></div>
+        <div class="field"><label>封面副标题或3个重点</label><textarea id="d_subtitle" rows="3">${esc(draft.subtitle)}</textarea></div>
         <div class="field"><label>小红书正文</label><textarea id="d_body" rows="8">${esc(draft.body)}</textarea></div>
         <div class="actions">
           <button class="btn ghost small" onclick="rewriteField('title','重新生成标题')">重写标题</button>
@@ -391,7 +404,9 @@ function viewGenerate() {
         <div class="field"><label>Hashtag</label><input id="d_hashtags" value="${esc(draft.hashtags || a.fixedHashtags || '')}"></div>
         <div class="field"><label>海报制作说明</label><textarea id="d_posterNotes" rows="3">${esc(draft.posterNotes)}</textarea></div>
         <div class="field"><label>参考资料</label><textarea id="d_sources" rows="2">${esc(draft.sourcesText)}</textarea></div>
-        <div class="field"><label>待人工确认</label><textarea id="d_pending" rows="2">${esc(draft.pendingConfirm)}</textarea></div>
+        <div class="field"><label>需要人工确认的资料</label><textarea id="d_pending" rows="2">${esc(draft.pendingConfirm)}</textarea></div>
+        <div class="field"><label>合规风险提示</label><textarea id="d_risk" rows="2">${esc(draft.riskNote)}</textarea></div>
+        <p class="hint">保存后状态为 Draft。AI 不能自行改为 Approved 或 Published。</p>
         <div class="row">
           <div class="field"><label>业务类别</label><input id="d_biz" value="${esc(draft.businessCategory)}"></div>
           <div class="field"><label>计划发布</label><input id="d_pub" type="datetime-local" value="${esc(draft.publishAt)}"></div>
@@ -440,9 +455,13 @@ function loadRefImg(ev) {
   img.src = URL.createObjectURL(f);
 }
 function stashDraft() {
+  draft.topic = val('d_topic') || draft.topic;
+  draft.audience = val('d_audience') || draft.audience;
+  draft.purpose = val('d_purpose') || draft.purpose;
   draft.title = val('d_title') || draft.title;
   draft.subtitle = val('d_subtitle') || draft.subtitle;
   draft.body = val('d_body') || draft.body;
+  draft.riskNote = val('d_risk') || draft.riskNote;
   draft.cta = val('d_cta') || draft.cta;
   draft.hashtags = val('d_hashtags') || draft.hashtags;
   draft.posterNotes = val('d_posterNotes') || draft.posterNotes;
@@ -466,9 +485,11 @@ function paintPoster() {
   g.fillRect(0, 220, W, 8);
   g.fillStyle = '#fff';
   g.font = '600 28px "PingFang SC", sans-serif';
-  g.fillText('CPLUS GROUP', 56, 70);
+  g.fillText('CPLUS GROUP', 56, 64);
+  g.font = '18px "PingFang SC", sans-serif';
+  g.fillText('Global Growth, Built on Compliance.', 56, 98);
   g.font = '20px "PingFang SC", sans-serif';
-  g.fillText(posterTpl === 'biz' ? (draft.businessCategory || '企业合规') : '香港 · 合规 · 跨境', 56, 110);
+  g.fillText(posterTpl === 'biz' ? (draft.businessCategory || '跨境合规') : '全球业务，合规先行', 56, 168);
   if (refImage) {
     g.globalAlpha = 0.16;
     g.drawImage(refImage, 0, 240, W, 420);
@@ -533,7 +554,7 @@ async function rewriteField(field, instruction) {
 
 function copyDraft() {
   stashDraft();
-  const text = `【封面标题】${draft.title}\n【副标题/三个重点】${draft.subtitle}\n【笔记正文】\n${draft.body}\n【CTA】${draft.cta}\n【Hashtag】${draft.hashtags}\n【海报制作说明】${draft.posterNotes}\n【参考资料】${draft.sourcesText}\n【待人工确认事项】${draft.pendingConfirm}`;
+  const text = `【内容主题】${draft.topic}\n【目标客户】${draft.audience}\n【内容目的】${draft.purpose}\n【封面标题】${draft.title}\n【封面副标题或3个重点】${draft.subtitle}\n【小红书正文】\n${draft.body}\n【CTA】${draft.cta}\n【Hashtag】${draft.hashtags}\n【海报制作说明】${draft.posterNotes}\n【参考资料及链接】${draft.sourcesText}\n【需要人工确认的资料】${draft.pendingConfirm}\n【合规风险提示】${draft.riskNote}\n【内容状态】Draft`;
   copy(text);
   toast('已复制');
 }
@@ -558,10 +579,13 @@ async function saveDraftToCalendar() {
       hashtags: draft.hashtags,
       posterNotes: draft.posterNotes,
       pendingConfirm: draft.pendingConfirm,
+      riskNote: draft.riskNote,
+      audience: draft.audience,
+      purpose: draft.purpose,
       sources: draft.sourcesText ? [{ name: draft.sourcesText }] : [],
       businessCategory: draft.businessCategory,
       publishAt: draft.publishAt,
-      topic: draft.title,
+      topic: draft.topic || draft.title,
       status: 'Draft'
     });
     if (canvas && saved.item) {
