@@ -32,6 +32,8 @@ button, input, textarea { font: inherit; color: inherit; }
   padding: 20px 24px 100px;
 }
 
+.app .stage h1 { color: var(--ink); }
+
 .top {
   display: flex;
   align-items: center;

@@ -3,28 +3,52 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CPLUS 小红书助理</title>
-  <link rel="stylesheet" href="/css/style.css?v=10">
+  <title>CPLUS 新媒体运营工作台</title>
+  <link rel="stylesheet" href="/css/style.css?v=11">
+  <link rel="stylesheet" href="/css/theme.css?v=11">
 </head>
 <body>
-  <div class="shell">
-    <header class="top">
-      <div class="brand" onclick="go('produce')">
+  <div class="app">
+    <aside class="side" id="side">
+      <div class="brand" onclick="go('chat')">
         <img class="logo" src="/img/cplus-mark.png" alt="CPLUS GROUP">
         <div class="brand-text">
           <strong>CPLUS</strong>
-          <span>小红书助理</span>
+          <span>运营工作台</span>
         </div>
       </div>
-      <nav class="steps" id="steps">
-        <button type="button" data-page="produce" onclick="go('produce')">出稿</button>
+      <nav class="nav" id="steps">
+        <p class="nav-label">工作</p>
+        <button type="button" data-page="chat" onclick="go('chat')">对话</button>
+        <button type="button" data-page="generate" onclick="go('generate')">生成器</button>
+        <button type="button" data-page="calendar" onclick="go('calendar')">日历</button>
+        <button type="button" data-page="review" onclick="go('review')">复盘</button>
+        <p class="nav-label">资料</p>
+        <button type="button" data-page="knowledge" onclick="go('knowledge')">知识库</button>
         <button type="button" data-page="feed" onclick="go('feed')">喂帖</button>
         <button type="button" data-page="style" onclick="go('style')">风格</button>
-        <button type="button" data-page="rules" onclick="go('rules')">规则</button>
+        <button type="button" data-page="materials" onclick="go('materials')">素材</button>
+        <p class="nav-label">系统</p>
+        <button type="button" data-page="agent" onclick="go('agent')">Agent 规则</button>
+        <button type="button" data-page="rules" onclick="go('rules')">账号规则</button>
+        <button type="button" data-page="prompt" onclick="go('prompt')">Prompt 模板</button>
+        <button type="button" data-page="produce" onclick="go('produce')">一句话出稿</button>
         <button type="button" data-page="archive" onclick="go('archive')">存档</button>
+        <button type="button" data-page="users" onclick="go('users')">权限</button>
       </nav>
-    </header>
-    <main class="stage" id="stage"></main>
+      <div class="side-foot" id="sideFoot"></div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <button type="button" class="menu-btn" onclick="toggleSide()">菜单</button>
+        <div class="brand mobile-brand" onclick="go('chat')">
+          <img class="logo" src="/img/cplus-mark.png" alt="CPLUS">
+          <strong>CPLUS</strong>
+        </div>
+        <div class="top-actions" id="topActions"></div>
+      </header>
+      <main class="stage" id="stage"></main>
+    </div>
   </div>
 
   <div class="savebar hidden" id="savebar">
@@ -35,11 +59,12 @@
   <div class="toasts" id="toasts"></div>
   <div class="veil hidden" id="veil"><p id="veilText">处理中</p></div>
   <div class="sheet hidden" id="sheet"></div>
-
   <div id="pdfMount" class="pdf-mount" aria-hidden="true"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="/js/app.js?v=10"></script>
+  <script src="/js/app.js?v=11"></script>
+  <script src="/js/workbench.js?v=11"></script>
+  <script>boot();</script>
 </body>
 </html>

@@ -259,7 +259,7 @@ async function go(name) {
   const url = new URL(location.href);
   url.searchParams.set('p', name);
   history.replaceState(null, '', url);
-  document.querySelectorAll('.steps button').forEach((b) => {
+  document.querySelectorAll('.steps button, .nav button').forEach((b) => {
     b.classList.toggle('on', b.dataset.page === name);
   });
   draw();
@@ -309,9 +309,9 @@ async function boot() {
     toast(e.message, true);
   }
   const asked = new URLSearchParams(location.search).get('p');
-  const allowed = ['produce', 'feed', 'style', 'rules', 'archive'];
-  page = allowed.includes(asked) ? asked : 'produce';
-  go(page);
+  const allowed = ['chat', 'generate', 'calendar', 'review', 'knowledge', 'feed', 'style', 'materials', 'agent', 'rules', 'prompt', 'archive', 'users', 'produce'];
+  page = allowed.includes(asked) ? asked : 'chat';
+  draw();
 }
 
 function analyzeLocal(items) {
@@ -1109,5 +1109,3 @@ window.addEventListener('beforeunload', (e) => {
   e.preventDefault();
   e.returnValue = '';
 });
-
-boot();

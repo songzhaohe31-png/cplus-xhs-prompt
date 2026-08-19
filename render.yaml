@@ -9,3 +9,9 @@ services:
     envVars:
       - key: DATA_DIR
         value: /app/data
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_API_BASE
+        value: https://api.openai.com/v1
+      - key: AI_MODEL
+        value: gpt-4o-mini

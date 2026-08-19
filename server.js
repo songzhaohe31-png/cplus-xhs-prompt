@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const { callChat, AiError, resolveAiConfig } = require('./lib/ai');
 
 const app = express();
 const PORT = process.env.PORT || 3210;
@@ -51,7 +52,12 @@ const lists = {
   materials: loadList('materials.json'),
   schedules: loadList('schedules.json'),
   posts: loadList('posts.json'),
-  feed: loadList('feed.json')
+  feed: loadList('feed.json'),
+  knowledge: loadList('knowledge.json'),
+  contents: loadList('contents.json'),
+  metrics: loadList('metrics.json'),
+  chat: loadList('chat.json'),
+  suggestions: loadList('suggestions.json')
 };
 
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
@@ -101,69 +107,17 @@ ensureDataFile('settings.json', {
 
 // ==================== AI Call Helper ====================
 async function callAI(prompt, settings, systemPrompt) {
-  if (!settings.apiBaseUrl || !settings.apiKey) {
-    throw new Error('AI_API_NOT_CONFIGURED');
-  }
-
+  const cfg = resolveAiConfig(settings || {});
+  if (!cfg.configured) throw new Error('AI_API_NOT_CONFIGURED');
   const messages = [];
-  if (systemPrompt) {
-    messages.push({ role: 'system', content: systemPrompt });
-  }
+  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
   messages.push({ role: 'user', content: prompt });
-
-  const baseUrl = settings.apiBaseUrl.replace(/\/$/, '');
-  // Support both full endpoint URLs and base URLs
-  const url = baseUrl.endsWith('/chat/completions')
-    ? baseUrl
-    : baseUrl.includes('/v1')
-      ? `${baseUrl}/chat/completions`
-      : `${baseUrl}/v1/chat/completions`;
-
-  const body = JSON.stringify({
-    model: settings.model || 'gpt-4o',
-    messages: messages,
-    temperature: 0.8,
-    max_tokens: 8000
-  });
-
-  return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url);
-    const isHttps = parsedUrl.protocol === 'https:';
-    const options = {
-      hostname: parsedUrl.hostname,
-      port: parsedUrl.port || (isHttps ? 443 : 80),
-      path: parsedUrl.pathname + parsedUrl.search,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${settings.apiKey}`,
-        'Content-Length': Buffer.byteLength(body)
-      }
-    };
-
-    const transport = isHttps ? https : http;
-    const req = transport.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`AI API returned ${res.statusCode}: ${data.substring(0, 500)}`));
-          return;
-        }
-        try {
-          const json = JSON.parse(data);
-          const content = json.choices?.[0]?.message?.content || '';
-          resolve(content);
-        } catch (e) {
-          reject(new Error(`Failed to parse AI response: ${e.message}`));
-        }
-      });
-    });
-
-    req.on('error', (e) => reject(e));
-    req.write(body);
-    req.end();
-  });
+  try {
+    return await callChat(messages, settings, { timeoutMs: 90000, retries: 2 });
+  } catch (e) {
+    if (e instanceof AiError && e.code === 'AI_API_NOT_CONFIGURED') throw new Error('AI_API_NOT_CONFIGURED');
+    throw e;
+  }
 }
 
 // ==================== Build Rules Prompt ====================
@@ -423,11 +377,14 @@ app.post('/api/rules/reset', (req, res) => {
 // --- Settings ---
 app.get('/api/settings', (req, res) => {
   const settings = readData('settings.json');
-  // Mask API key for security
+  const cfg = resolveAiConfig(settings || {});
   res.json({
     ...settings,
-    apiKey: settings.apiKey ? settings.apiKey.substring(0, 4) + '****' + settings.apiKey.substring(settings.apiKey.length - 4) : '',
-    apiKeyConfigured: !!settings.apiKey
+    apiKey: '',
+    apiKeyConfigured: cfg.configured,
+    aiSource: cfg.source,
+    model: cfg.model,
+    apiBaseUrl: settings.apiBaseUrl || process.env.AI_API_BASE || ''
   });
 });
 
@@ -806,6 +763,9 @@ app.get('/api/export', (req, res) => {
     schedules: { items: lists.schedules.items },
     posts: { items: lists.posts.items },
     feed: { items: lists.feed.items.map(stripDataUrl) },
+    knowledge: { items: lists.knowledge.items },
+    contents: { items: lists.contents.items },
+    metrics: { items: lists.metrics.items },
     settings: { ...readData('settings.json'), apiKey: '***' },
     exportedAt: new Date().toISOString()
   };
@@ -837,6 +797,20 @@ app.post('/api/import', (req, res) => {
     persistList('feed');
   }
   res.json({ success: true });
+});
+
+require('./lib/workbench-api')({
+  app,
+  lists,
+  persistList,
+  readData,
+  writeData,
+  ensureDataFile,
+  DATA_DIR,
+  newId,
+  buildRulesPrompt,
+  buildProduceBrief,
+  callAI
 });
 
 app.get('/healthz', (req, res) => {
