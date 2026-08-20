@@ -13,12 +13,22 @@ services:
         value: xai
       - key: AI_API_BASE
         value: https://api.x.ai/v1
+      - key: XAI_BASE_URL
+        value: https://api.x.ai/v1
       - key: AI_API_KEY
         sync: false
       - key: XAI_API_KEY
         sync: false
       - key: AI_MODEL
-        value: grok-4.6
+        sync: false
+      - key: XAI_MODEL
+        sync: false
+      - key: XAI_TIMEOUT_MS
+        value: "180000"
+      - key: XAI_MAX_OUTPUT_TOKENS
+        value: "1800"
+      - key: XAI_FIRST_TOKEN_MS
+        value: "45000"
       - key: IMAGE_API_KEY
         sync: false
       - key: DATABASE_URL

@@ -274,46 +274,33 @@ async function go(name) {
   window.scrollTo(0, 0);
 }
 
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if ([...document.scripts].some((s) => s.src && s.src.indexOf(src) >= 0)) return resolve();
+    const el = document.createElement('script');
+    el.src = src;
+    el.async = true;
+    el.onload = resolve;
+    el.onerror = () => reject(new Error('脚本加载失败'));
+    document.body.appendChild(el);
+  });
+}
+
+function loadPdfLibs() {
+  if (window.html2canvas && window.jspdf) return Promise.resolve();
+  return Promise.all([
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'),
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+  ]);
+}
+
 async function boot() {
-  try {
-    const [mats, sch, posts, feed] = await Promise.all([
-      api('/api/materials').catch(() => ({ items: [] })),
-      api('/api/schedules').catch(() => ({ items: [] })),
-      api('/api/posts').catch(() => ({ items: [] })),
-      api('/api/feed').catch(() => ({ items: [], style: null }))
-    ]);
-    state.rules = {};
-    state.materials = mats.items || [];
-    state.schedules = sch.items || [];
-    state.posts = posts.items || [];
-    state.settings = {};
-    lastSavedAt = null;
-    const serverFeed = feed.items || [];
-    const merged = await hydratePreviews(mergeById(serverFeed, localFeed()));
-    rememberFeed(merged);
-    state.style = feed.style || analyzeLocal(merged);
-    const missing = merged.filter((m) => !serverFeed.some((s) => s.id === m.id));
-    if (missing.length) {
-      try {
-        const payload = missing.map((item) => ({
-          ...item,
-          images: (item.images || []).map((img) => ({
-            name: img.name,
-            mime: img.mime,
-            dataUrl: img.preview || ''
-          }))
-        }));
-        const saved = await post('/api/feed', payload);
-        if (saved.items) rememberFeed(await hydratePreviews(mergeById(saved.items, merged)));
-        if (saved.style) state.style = saved.style;
-      } catch (e) { console.warn('rehydrate feed failed', e); }
-    }
-  } catch (e) {
-    const local = await hydratePreviews(localFeed());
-    rememberFeed(local);
-    state.style = analyzeLocal(local);
-    toast(e.message, true);
-  }
+  state.rules = state.rules || {};
+  state.materials = state.materials || [];
+  state.schedules = state.schedules || [];
+  state.posts = state.posts || [];
+  state.feed = state.feed || [];
+  state.settings = state.settings || {};
   const asked = new URLSearchParams(location.search).get('p');
   const allowed = ['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
   page = allowed.includes(asked) ? asked : 'chat';
@@ -980,6 +967,7 @@ function waitImages(root) {
 }
 
 async function downloadPdf(html, filename) {
+  try { await loadPdfLibs(); } catch (e) {}
   const sx = window.scrollX;
   const sy = window.scrollY;
   window.scrollTo(0, 0);

@@ -23,19 +23,29 @@ const { attachWorkspace, isBlocked, limited, clientIp } = require('./lib/workspa
 
 const app = express();
 const PORT = process.env.PORT || 3210;
+const ASSET_VER = process.env.ASSET_VER || 'v17';
+const bootAt = Date.now();
 
 app.use(express.json({ limit: '50mb' }));
+app.use((req, res, next) => {
+  const m = req.path.match(/^\/(js|css|img)\/([^/]+)\.(v\d+)\.([a-z0-9]+)$/i);
+  if (m) req.url = '/' + m[1] + '/' + m[2] + '.' + m[4];
+  next();
+});
 app.get('/', (req, res) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-  res.set('Pragma', 'no-cache');
+  res.set('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 app.use(express.static(path.join(__dirname, 'public'), {
-  etag: false,
-  lastModified: false,
+  etag: true,
+  maxAge: 0,
   setHeaders(res, filePath) {
-    if (/\.(html|js|css)$/.test(filePath)) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    if (/\.html$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache');
+      return;
+    }
+    if (/\.(js|css|png|jpe?g|gif|webp|svg|woff2?|ico)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
   }
 }));
@@ -387,6 +397,7 @@ const auth = createAuth({ readData, writeData, ensureDataFile, newId });
 app.use((req, res, next) => {
   if (req.path === '/healthz') return next();
   if (!req.path.startsWith('/api')) return next();
+  res.set('Cache-Control', 'no-store');
   attachWorkspace(req, res);
   req.user = { id: 'public', name: 'CPLUS User', role: 'public', workspaceId: req.workspaceId };
   if (isBlocked(req.originalUrl)) {
@@ -903,19 +914,15 @@ app.listen(PORT, '0.0.0.0', async () => {
   } catch (e) {
     console.error('[db] init failed', e.message);
   }
-  const { resolveAiConfig, probeAi, maskSecret } = require('./lib/ai');
+  const { resolveAiConfig, refreshRuntimeModel, maskSecret } = require('./lib/ai');
   const cfg = resolveAiConfig({});
+  console.log('[boot] instance plan-hint=' + (process.env.RENDER ? 'render' : 'local') + ' asset=' + ASSET_VER + ' ready_ms=' + (Date.now() - bootAt));
   if (!cfg.configured) {
-    console.warn('[ai] 未配置密钥。请设置环境变量 XAI_API_KEY 或 AI_API_KEY 后重启。公开页面只会显示服务暂不可用。');
+    console.warn('[ai] 未配置密钥。请设置环境变量 XAI_API_KEY 或 AI_API_KEY 后重启。');
   } else {
-    console.log('[ai] 已配置 provider=' + cfg.provider + ' model=' + cfg.model + ' base=' + cfg.baseHost + ' keyKind=' + cfg.keyKind + ' key=' + maskSecret(cfg.apiKey) + (cfg.baseInvalid ? ' (已忽略无效的 AI_API_BASE)' : ''));
-    if (!cfg.keyLooksValid) {
-      console.warn('[ai] 密钥格式不正确。xAI 密钥必须以 xai- 开头，团队 UUID 不能当作密钥。');
-    } else {
-      probeAi().then((p) => {
-        if (p.ok) console.log('[ai] probe ok, xAI accepted the key');
-        else console.warn('[ai] probe failed', p.status || p.reason);
-      }).catch((e) => console.warn('[ai] probe error', e.message));
+    console.log('[ai] provider=' + cfg.provider + ' base=' + cfg.baseHost + ' key=' + maskSecret(cfg.apiKey));
+    if (cfg.keyLooksValid) {
+      refreshRuntimeModel().catch((e) => console.warn('[ai] model refresh', e.message));
     }
   }
   console.log(`XHS Content Agent running at http://localhost:${PORT}`);

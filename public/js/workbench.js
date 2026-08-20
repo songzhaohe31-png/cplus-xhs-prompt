@@ -59,25 +59,58 @@ function paintChrome() {
   if (top) top.innerHTML = '';
 }
 
+const inflight = {};
+let pageAbort = null;
+
+function cachedApi(key, url, signal) {
+  if (!inflight[key]) {
+    inflight[key] = api(url, { signal }).catch((e) => {
+      delete inflight[key];
+      throw e;
+    });
+  }
+  return inflight[key];
+}
+
+async function ensurePageData(name) {
+  if (pageAbort) pageAbort.abort();
+  pageAbort = new AbortController();
+  const signal = pageAbort.signal;
+  try {
+    if (name === 'calendar' || name === 'library' || name === 'generate') {
+      const d = await cachedApi('contents', '/api/contents', signal);
+      state.contents = d.items || [];
+    } else if (name === 'knowledge') {
+      const d = await cachedApi('knowledge', '/api/knowledge', signal);
+      state.knowledge = d.items || [];
+    } else if (name === 'review') {
+      const [m, s] = await Promise.all([
+        cachedApi('metrics', '/api/metrics', signal),
+        api('/api/suggestions', { signal }).catch(() => ({ items: [] }))
+      ]);
+      state.metrics = m.items || [];
+      state.suggestions = s.items || [];
+    } else if (name === 'history') {
+      const d = await api('/api/feed', { signal }).catch(() => ({ items: [] }));
+      state.feed = d.items || [];
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    console.warn(e);
+  }
+}
+
 async function bootWorkbench() {
   try {
-    const [me, knowledge, contents, metrics, suggestions] = await Promise.all([
-      api('/api/me'),
-      api('/api/knowledge'),
-      api('/api/contents'),
-      api('/api/metrics'),
-      api('/api/suggestions').catch(() => ({ items: [] }))
-    ]);
-    state.me = me;
+    const b = await api('/api/bootstrap');
+    state.me = { mode: b.mode || 'public', serviceAvailable: !!b.serviceAvailable };
+    state.workspaceSummary = b.workspaceSummary || {};
     state.authed = true;
     state.agent = {};
-    state.knowledge = knowledge.items || [];
-    state.contents = contents.items || [];
-    state.metrics = metrics.items || [];
-    state.suggestions = (suggestions && suggestions.items) || [];
     paintChrome();
   } catch (e) {
     console.warn(e);
+    state.me = { mode: 'public', serviceAvailable: true };
     state.authed = true;
   }
 }
@@ -113,6 +146,10 @@ go = async function (name) {
   const allowed = ['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
   if (!allowed.includes(name)) name = 'chat';
   await _go(name);
+  if (name !== 'chat') {
+    await ensurePageData(name);
+    if (page === name) draw();
+  }
 };
 
 const _boot = boot;
@@ -122,10 +159,13 @@ boot = async function () {
   const allowed = ['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
   if (!allowed.includes(page)) page = 'chat';
   draw();
+  if (page !== 'chat') {
+    await ensurePageData(page);
+    draw();
+  }
 };
 
 function viewChat() {
-  const ai = state.me.ai || {};
   const log = state.chatLog.map((m) => `
     <div class="bubble ${m.role}">
       <div class="meta">${m.role === 'user' ? '你' : 'CPLUS 助理'} · ${esc(m.time || '')}</div>
@@ -137,7 +177,7 @@ function viewChat() {
   return `
     <h1>CPLUS新媒体运营助手</h1>
     <p class="lead">输入一句话，快速生成内容排期、小红书文案和海报方案。</p>
-    ${state.me && (state.me.hint || state.me.serviceAvailable === false) ? `<div class="warn">${esc(state.me.hint || 'AI服务暂时不可用，请稍后再试。')}</div>` : ''}
+    ${state.me && state.me.serviceAvailable === false ? `<div class="warn">AI服务暂时不可用，请稍后再试。</div>` : ''}
     <div class="quick">
       ${[
         ['生成未来4周的小红书内容排期，每周3篇，重点推广香港公司注册、银行开户和MSO牌照。', '生成未来4周排期'],
@@ -182,8 +222,7 @@ function renderStructured(structured) {
   return `
     <div class="actions" style="margin:10px 0">
       <button class="btn" onclick="saveStructuredToCalendar()">保存至日历</button>
-      ${isSchedule ? `<button class="btn ghost" onclick="fillChat('根据刚才的排期，生成全部文案'); sendChat()">生成全部文案</button>
-      <button class="btn ghost" onclick="fillChat('根据刚才的排期，生成本周文案'); sendChat()">生成本周文案</button>` : ''}
+      ${isSchedule ? `<button class="btn ghost" onclick="fillChat('根据刚才的排期，生成本周3篇内容。'); sendChat()">生成本周3篇</button>` : ''}
       <button class="btn ghost" onclick="exportStructuredCsv()">导出 Excel</button>
       <button class="btn ghost" onclick="exportStructuredDoc()">导出 Word</button>
     </div>
@@ -191,56 +230,177 @@ function renderStructured(structured) {
   `;
 }
 
+function setProgress(text) {
+  const p2 = document.getElementById('chatProgress');
+  if (!p2) return;
+  p2.classList.remove('hidden');
+  p2.textContent = text;
+}
+
+function finishBot(bot, payload) {
+  bot.streaming = false;
+  bot.text = payload.reply || bot.text || '';
+  bot.sources = payload.sources;
+  bot.dupHint = payload.dupHint;
+  bot.html = renderStructured(payload.structured) + `<div id="streamOut" style="white-space:pre-wrap;margin-top:10px">${esc(bot.text || '')}</div>
+    <div class="actions" style="margin-top:8px">
+      <button class="btn quiet small" onclick="retryLast()">重新生成</button>
+      <button class="btn quiet small" onclick="rewriteField('title')">只重写标题</button>
+      <button class="btn quiet small" onclick="rewriteField('body')">只重写正文</button>
+    </div>`;
+  state.lastStructured = payload.structured;
+  lastResult = bot.text;
+}
+
 async function sendChat() {
   if (chatBusy) return;
   const message = val('chatMsg');
   if (!message) { toast('先写一句指令', true); return; }
   if (state.me && state.me.serviceAvailable === false) {
-    toast(state.me.hint || 'AI服务暂时不可用，请稍后再试。', true);
+    toast('AI服务暂时不可用，请稍后再试。', true);
     return;
   }
+  lastCommand = message;
   chatBusy = true;
   chatAbort = new AbortController();
-  const btn = document.getElementById('chatSend');
-  if (btn) btn.disabled = true;
   state.chatLog.push({ role: 'user', text: message, time: whenFull(new Date().toISOString()) });
+  const bot = { role: 'bot', text: '', time: whenFull(new Date().toISOString()), streaming: true, html: '<div id="streamOut" style="white-space:pre-wrap"></div>' };
+  state.chatLog.push(bot);
   draw();
-  const p2 = document.getElementById('chatProgress');
-  if (p2) {
-    p2.classList.remove('hidden');
-    p2.textContent = '检索规则、知识库与官方资料…';
-  }
+  const started = Date.now();
+  const tick = setInterval(() => {
+    const sec = Math.round((Date.now() - started) / 1000);
+    setProgress('正在生成内容… 已等待 ' + sec + ' 秒');
+  }, 500);
+  setProgress('正在准备资料…');
   try {
-    if (p2) p2.textContent = '模型生成中，请稍候…';
-    const res = await api('/api/agent/chat', { method: 'POST', body: JSON.stringify({ message }), signal: chatAbort.signal });
-    if (p2) p2.textContent = '已完成';
-    state.lastStructured = res.structured;
-    lastResult = res.reply;
-    lastCommand = message;
-    state.chatLog.push({
-      role: 'bot',
-      text: res.reply,
-      html: renderStructured(res.structured) + `<div style="white-space:pre-wrap;margin-top:10px">${esc(res.reply || '')}</div>`,
-      time: whenFull(new Date().toISOString()),
-      sources: res.sources,
-      dupHint: res.dupHint,
-      official: res.official
-    });
-    toast('已生成 ' + ((res.structured && res.structured.items && res.structured.items.length) || '') + ' 条');
+    if (/本周|这周/.test(message) && /[3三4四]篇/.test(message)) {
+      await runBatchJobs(message, bot);
+    } else {
+      await runStreamChat(message, bot);
+    }
   } catch (e) {
-    if (e.name === 'AbortError') toast('已取消');
+    if (e.name === 'AbortError' || (e.message && /cancel/i.test(e.message))) toast('已取消');
     else {
       const msg = (e && e.message) || 'AI服务暂时不可用，请稍后再试。';
       toast(msg, true);
-      state.chatLog.push({ role: 'bot', text: msg, time: whenFull(new Date().toISOString()) });
+      bot.text = msg;
+      bot.html = `<div style="white-space:pre-wrap">${esc(msg)}</div><div class="actions" style="margin-top:8px"><button class="btn quiet small" onclick="retryLast()">失败重试</button></div>`;
     }
   } finally {
+    clearInterval(tick);
     chatBusy = false;
     chatAbort = null;
     draw();
     const el = document.getElementById('chatMsg');
     if (el) el.value = '';
   }
+}
+
+async function runStreamChat(message, bot) {
+  setProgress('正在生成内容…');
+  const res = await fetch('/api/agent/chat/stream', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+    signal: chatAbort.signal
+  });
+  if (!res.ok || !res.body) {
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    throw new Error(data.error || '请求失败');
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let full = '';
+  let donePayload = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const chunks = buf.split('\n\n');
+    buf = chunks.pop() || '';
+    chunks.forEach((block) => {
+      const ev = (block.match(/^event: (.+)$/m) || [])[1];
+      const dataLine = (block.match(/^data: ([\s\S]+)$/m) || [])[1];
+      if (!dataLine) return;
+      let data = {};
+      try { data = JSON.parse(dataLine); } catch (e) { return; }
+      if (ev === 'status' && data.text) setProgress(data.text);
+      if (ev === 'delta' && data.text) {
+        full += data.text;
+        bot.text = full;
+        const out = document.getElementById('streamOut');
+        if (out) out.textContent = full.replace(/<<<JSON[\s\S]*$/, '');
+      }
+      if (ev === 'error') throw new Error(data.error || '生成失败');
+      if (ev === 'done') donePayload = data;
+    });
+  }
+  if (donePayload) finishBot(bot, donePayload);
+  else finishBot(bot, { reply: full.replace(/<<<JSON[\s\S]*$/, ''), structured: null });
+  toast('已生成');
+}
+
+async function runBatchJobs(message, bot) {
+  setProgress('正在拆成3篇后台任务…');
+  const created = await post('/api/agent/batch', { message });
+  bot.text = created.notice || '已开始分篇生成';
+  const seen = {};
+  const parts = [];
+  const deadline = Date.now() + 180000;
+  while (Date.now() < deadline) {
+    if (chatAbort && chatAbort.signal.aborted) throw new Error('cancelled');
+    const data = await api('/api/agent/jobs?groupId=' + encodeURIComponent(created.groupId));
+    const items = data.items || [];
+    const doneN = items.filter((j) => j.status === 'done').length;
+    const failN = items.filter((j) => j.status === 'failed').length;
+    setProgress('已完成 ' + doneN + '/' + items.length + (failN ? '，失败 ' + failN : '') + ' …');
+    items.forEach((j) => {
+      if ((j.status === 'done' || j.status === 'failed') && !seen[j.id]) {
+        seen[j.id] = true;
+        if (j.status === 'done') {
+          parts.push(j);
+          if (j.structured) state.lastStructured = j.structured;
+        }
+        const extra = j.status === 'done'
+          ? (j.reply || j.preview || '')
+          : (j.title + ' 失败：' + (j.error || '') + ' ');
+        const out = document.getElementById('streamOut');
+        if (out) out.textContent = parts.map((p) => p.reply || p.preview).join('\n\n————\n\n');
+        bot.text = (bot.text || '') + '\n\n' + extra;
+      }
+    });
+    if (items.length && items.every((j) => j.status === 'done' || j.status === 'failed')) break;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  const text = parts.map((p) => p.reply || p.preview).filter(Boolean).join('\n\n————\n\n') || bot.text;
+  finishBot(bot, { reply: text, structured: state.lastStructured });
+  toast('本周任务已结束');
+}
+
+function retryLast() {
+  if (!lastCommand) return;
+  const el = document.getElementById('chatMsg');
+  if (el) el.value = lastCommand;
+  sendChat();
+}
+
+async function rewriteField(field) {
+  if (!lastResult) { toast('没有可改写的内容', true); return; }
+  try {
+    const res = await post('/api/agent/rewrite', { field, instruction: '更自然、更短', current: lastResult });
+    state.chatLog.push({
+      role: 'bot',
+      text: res.reply,
+      html: `<div style="white-space:pre-wrap">${esc(res.reply || '')}</div>`,
+      time: whenFull(new Date().toISOString())
+    });
+    lastResult = res.reply;
+    draw();
+  } catch (e) { toast(e.message, true); }
 }
 
 function cancelChat() {
