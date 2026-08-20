@@ -10,11 +10,15 @@ services:
       - key: DATA_DIR
         value: /app/data
       - key: AI_PROVIDER
-        value: openai
+        value: xai
+      - key: AI_API_BASE
+        value: https://api.x.ai/v1
       - key: AI_API_KEY
         sync: false
+      - key: XAI_API_KEY
+        sync: false
       - key: AI_MODEL
-        value: gpt-4o-mini
+        value: grok-4.5
       - key: IMAGE_API_KEY
         sync: false
       - key: DATABASE_URL

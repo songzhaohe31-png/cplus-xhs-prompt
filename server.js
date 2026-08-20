@@ -1,6 +1,20 @@
-const express = require('express');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+(function loadEnv() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
+  fs.readFileSync(envPath, 'utf8').split(/\r?\n/).forEach((line) => {
+    const t = line.trim();
+    if (!t || t.startsWith('#') || !t.includes('=')) return;
+    const i = t.indexOf('=');
+    const k = t.slice(0, i).trim();
+    let v = t.slice(i + 1).trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    if (k && process.env[k] == null) process.env[k] = v;
+  });
+})();
+
+const express = require('express');
 const http = require('http');
 const https = require('https');
 const { callChat, AiError, resolveAiConfig } = require('./lib/ai');
@@ -888,6 +902,13 @@ app.listen(PORT, '0.0.0.0', async () => {
     console.log('[db]', db.enabled ? 'PostgreSQL connected' : 'JSON fallback');
   } catch (e) {
     console.error('[db] init failed', e.message);
+  }
+  const { resolveAiConfig } = require('./lib/ai');
+  const cfg = resolveAiConfig({});
+  if (!cfg.configured) {
+    console.warn('[ai] 未配置密钥。请设置环境变量 XAI_API_KEY 或 AI_API_KEY 后重启。公开页面只会显示服务暂不可用。');
+  } else {
+    console.log('[ai] 已配置 provider=' + cfg.provider + ' model=' + cfg.model);
   }
   console.log(`XHS Content Agent running at http://localhost:${PORT}`);
 });
