@@ -57,15 +57,29 @@ function viewLearn() {
   `;
 }
 
+function parseStatusLabel(k) {
+  if (k.status === 'parsing' || k.status === 'uploading') return '正在解析';
+  if (k.status === 'ocr') return '正在OCR';
+  if (k.status === 'failed' || !(k.charCount > 0)) return '识别失败';
+  if (k.needsConfirm) return '需要用户确认类型';
+  return '识别成功';
+}
+
 function renderLearnItems(items, feed) {
   const cards = [];
   items.forEach((k) => {
+    const failed = k.status === 'failed' || !(k.charCount > 0) && (k.status === 'ok' || !k.status);
     cards.push(`<article class="result-card">
       <h3>${esc(k.name)}</h3>
-      <p>${esc(k.label || (k.zone === 'sample' ? '历史文案' : '业务资料'))} · ${esc(k.business || '')}</p>
-      <p>提取状态：${esc(k.status || '')} · 事实约 ${esc(k.factCount || 0)} 条${k.timely ? ' · 可能有时效性' : ''}${k.needsConfirm ? ' · 需人工确认分类' : ''}</p>
-      ${k.facts ? `<p>${esc(k.facts)}</p>` : ''}
-      <div class="result-actions"><button class="btn quiet small" onclick="delKnowledge('${k.id}')">删除</button></div>
+      <p>${esc(k.label || '待识别')} · ${esc(parseStatusLabel(k))}</p>
+      <p>页数 ${esc(k.pageCount || '-')} · 提取 ${esc(k.charCount || 0)} 字 · 事实 ${esc(k.factCount || 0)} 条</p>
+      ${k.titles && k.titles.length ? `<p>标题：${esc(k.titles.slice(0,3).join(' / '))}</p>` : ''}
+      ${k.parseError ? `<div class="warn">${esc(k.parseError)}</div>` : ''}
+      ${k.ocrNote ? `<p class="hint">${esc(k.ocrNote)}</p>` : ''}
+      <div class="result-actions">
+        <button class="btn ghost small" onclick="viewExtract('${k.id}')">查看识别结果</button>
+        <button class="btn quiet small" onclick="delKnowledge('${k.id}')">删除</button>
+      </div>
     </article>`);
   });
   feed.forEach((f) => {
@@ -125,32 +139,61 @@ async function uploadBatch() {
   const files = input && input.files ? [...input.files] : [];
   const paste = val('pasteText');
   if (!files.length && !paste) { toast('请选择文件或粘贴文字', true); return; }
-  busy(true, '正在读取资料');
+  busy(true, '正在上传');
   try {
     for (const file of files) {
-      const dataUrl = await readFileData(file);
-      const textGuess = /\.txt$/i.test(file.name) ? '' : '';
-      await post('/api/knowledge', {
-        name: file.name,
-        filename: file.name,
-        mime: file.type,
-        dataUrl,
-        text: textGuess
-      });
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      const res = await fetch('/api/knowledge/upload', { method: 'POST', body: fd, credentials: 'include' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '上传失败');
       if (/^image\//.test(file.type)) {
+        const dataUrl = await readFileData(file);
         await post('/api/feed', [{ caption: paste || file.name, images: [{ name: file.name, mime: file.type, dataUrl }] }]);
       }
     }
     if (paste && !files.length) {
-      await post('/api/knowledge', { name: '粘贴文案', text: paste, mime: 'text/plain' });
-      if ((paste.match(/#/g) || []).length >= 2) {
-        await post('/api/feed', [{ caption: paste }]);
-      }
+      const fd = new FormData();
+      fd.append('text', paste);
+      const res = await fetch('/api/knowledge/upload', { method: 'POST', body: fd, credentials: 'include' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '上传失败');
+      if ((paste.match(/#/g) || []).length >= 2) await post('/api/feed', [{ caption: paste }]);
     }
-    await reloadLearn();
-    toast('已上传，可继续添加或开始分析');
+    toast('已开始解析，请稍候查看识别结果');
+    await pollKnowledge();
   } catch (e) { toast(e.message, true); }
   finally { busy(false); }
+}
+
+async function pollKnowledge() {
+  for (let i = 0; i < 45; i++) {
+    const d = await api('/api/knowledge').catch(() => ({ items: [] }));
+    state.knowledge = d.items || [];
+    draw();
+    const pending = (d.items || []).some((k) => k.status === 'parsing' || k.status === 'ocr' || k.status === 'uploading');
+    if (!pending) break;
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  await reloadLearn();
+}
+
+async function viewExtract(id) {
+  const d = await api('/api/knowledge/' + id + '/preview');
+  const sheet = document.getElementById('sheet');
+  if (!sheet) return;
+  sheet.classList.remove('hidden');
+  sheet.innerHTML = `<div class="sheet-card" onclick="event.stopPropagation()">
+    <h2>${esc(d.name)}</h2>
+    <p>${esc(d.label || '')} · ${esc(d.status)} · ${esc(d.charCount)} 字 · ${esc(d.pageCount)} 页</p>
+    ${d.parseError ? `<div class="warn">${esc(d.parseError)}</div>` : ''}
+    <h3>标题</h3><p>${esc((d.titles || []).join(' / ') || '无')}</p>
+    <h3>业务事实</h3>${(d.facts || []).slice(0, 8).map((f) => `<p>${esc(f.content || f)} <span class="hint">p.${esc(f.page || '')}</span></p>`).join('') || '<p>无</p>'}
+    <h3>正文预览</h3>
+    <div class="safe-text">${esc((d.preview || '').slice(0, 1800))}</div>
+    <button class="btn" onclick="closeSheet()">关闭</button>
+  </div>`;
+  sheet.onclick = closeSheet;
 }
 
 async function reloadLearn() {
@@ -365,10 +408,10 @@ async function rewriteInline(i, field) {
 
 function makePosterDataUrl(item) {
   const canvas = document.createElement('canvas');
-  canvas.width = 1122;
-  canvas.height = 1402;
+  canvas.width = 1080;
+  canvas.height = 1350;
   const g = canvas.getContext('2d');
-  const W = 1122, H = 1402;
+  const W = 1080, H = 1350;
   g.fillStyle = '#f4f7fb';
   g.fillRect(0, 0, W, H);
   g.fillStyle = '#1a4b8c';
@@ -388,7 +431,7 @@ function makePosterDataUrl(item) {
     g.fillRect(56, 640 + idx * 120, 10, 70);
     g.fillStyle = '#10263f';
     g.font = '32px "PingFang SC", sans-serif';
-    g.fillText(String(p).slice(0, 22), 84, 688 + idx * 120);
+    wrapText(g, String(p), 84, 688 + idx * 110, W - 160, 40, '32px "PingFang SC", sans-serif');
   });
   g.fillStyle = '#1a4b8c';
   g.font = '22px "PingFang SC", sans-serif';
