@@ -167,13 +167,13 @@ async function uploadBatch() {
 }
 
 async function pollKnowledge() {
-  for (let i = 0; i < 45; i++) {
+  for (let i = 0; i < 90; i++) {
     const d = await api('/api/knowledge').catch(() => ({ items: [] }));
     state.knowledge = d.items || [];
     draw();
     const pending = (d.items || []).some((k) => k.status === 'parsing' || k.status === 'ocr' || k.status === 'uploading');
     if (!pending) break;
-    await new Promise((r) => setTimeout(r, 700));
+    await new Promise((r) => setTimeout(r, 1000));
   }
   await reloadLearn();
 }
@@ -187,6 +187,8 @@ async function viewExtract(id) {
     <h2>${esc(d.name)}</h2>
     <p>${esc(d.label || '')} · ${esc(d.status)} · ${esc(d.charCount)} 字 · ${esc(d.pageCount)} 页</p>
     ${d.parseError ? `<div class="warn">${esc(d.parseError)}</div>` : ''}
+    ${d.ocrNote ? `<p class="hint">${esc(d.ocrNote)}</p>` : ''}
+    ${d.visual ? `<p>版式：${esc(d.visual.layout || '')} · Logo：${esc(d.visual.logo || '')} · 色彩：${esc((d.visual.colors || []).join(' / '))}</p>` : ''}
     <h3>标题</h3><p>${esc((d.titles || []).join(' / ') || '无')}</p>
     <h3>业务事实</h3>${(d.facts || []).slice(0, 8).map((f) => `<p>${esc(f.content || f)} <span class="hint">p.${esc(f.page || '')}</span></p>`).join('') || '<p>无</p>'}
     <h3>正文预览</h3>

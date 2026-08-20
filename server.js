@@ -23,7 +23,7 @@ const { attachWorkspace, isBlocked, limited, clientIp } = require('./lib/workspa
 
 const app = express();
 const PORT = process.env.PORT || 3210;
-const ASSET_VER = process.env.ASSET_VER || 'v21';
+const ASSET_VER = process.env.ASSET_VER || 'v22';
 const bootAt = Date.now();
 
 app.use(express.json({ limit: '50mb' }));
