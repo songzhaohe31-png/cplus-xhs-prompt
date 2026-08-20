@@ -77,19 +77,19 @@ async function ensurePageData(name) {
   pageAbort = new AbortController();
   const signal = pageAbort.signal;
   try {
-    if (name === 'facts' || name === 'knowledge' || name === 'home' || name === 'style' || name === 'rules') {
+    if (name === 'learn' || name === 'facts' || name === 'knowledge' || name === 'home' || name === 'style' || name === 'rules' || name === 'samples') {
       const d = await cachedApi('knowledge', '/api/knowledge', signal).catch(() => ({ items: [] }));
       state.knowledge = d.items || [];
     }
-    if (name === 'samples' || name === 'history' || name === 'style' || name === 'home') {
+    if (name === 'learn' || name === 'samples' || name === 'history' || name === 'style' || name === 'home') {
       const d = await api('/api/feed', { signal }).catch(() => ({ items: [] }));
       state.feed = d.items || [];
     }
-    if (name === 'schedule' || name === 'calendar' || name === 'library' || name === 'produce' || name === 'generate' || name === 'reports') {
+    if (name === 'studio' || name === 'results' || name === 'schedule' || name === 'calendar' || name === 'library' || name === 'produce' || name === 'generate' || name === 'reports') {
       const d = await cachedApi('contents', '/api/contents', signal).catch(() => ({ items: [] }));
       state.contents = d.items || [];
     }
-    if (name === 'style' || name === 'rules' || name === 'home') {
+    if (name === 'learn' || name === 'style' || name === 'rules' || name === 'home' || name === 'studio') {
       const d = await api('/api/dna', { signal }).catch(() => null);
       if (d && d.dna) state.dna = d.dna;
     }
@@ -125,22 +125,25 @@ draw = function () {
   paintChrome();
   const root = document.getElementById('stage');
   const extra = {
-    home: viewHome,
-    facts: viewFacts,
-    samples: viewSamples,
-    style: viewStyle,
-    rules: viewRules,
-    topics: viewTopics,
-    produce: viewProduce,
-    schedule: viewSchedule,
-    reports: viewReports,
-    chat: viewTopics,
-    knowledge: viewFacts,
-    calendar: viewSchedule,
-    generate: viewProduce,
-    review: viewReports,
-    library: viewSchedule,
-    history: viewSamples
+    learn: viewLearn,
+    studio: viewStudio,
+    results: viewResults,
+    home: viewLearn,
+    facts: viewLearn,
+    samples: viewLearn,
+    style: viewLearn,
+    rules: viewLearn,
+    topics: viewStudio,
+    produce: viewStudio,
+    schedule: viewResults,
+    reports: viewResults,
+    chat: viewStudio,
+    knowledge: viewLearn,
+    calendar: viewResults,
+    generate: viewStudio,
+    review: viewResults,
+    library: viewResults,
+    history: viewLearn
   };
   if (extra[page]) {
     showSavebar(false);
@@ -155,7 +158,7 @@ draw = function () {
 const _go = go;
 go = async function (name) {
   const allowed = FLOW_PAGES.concat(['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate']);
-  if (!allowed.includes(name)) name = 'home';
+  if (!allowed.includes(name)) name = 'learn';
   await _go(name);
   if (name !== 'chat') {
     await ensurePageData(name);
@@ -168,7 +171,7 @@ boot = async function () {
   await bootWorkbench();
   await _boot();
   const allowed = FLOW_PAGES.concat(['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate']);
-  if (!allowed.includes(page) || page === 'chat') page = 'home';
+  if (!allowed.includes(page) || page === 'chat' || page === 'home') page = 'learn';
   draw();
   await ensurePageData(page);
   draw();
@@ -706,6 +709,8 @@ async function delKnowledge(id) {
   try {
     const res = await del('/api/knowledge/' + id);
     state.knowledge = res.items || [];
+    if (res.readiness) state.readiness = res.readiness;
+    await refreshReady();
     draw();
   } catch (e) { toast(e.message, true); }
 }

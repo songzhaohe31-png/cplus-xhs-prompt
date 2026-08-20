@@ -23,7 +23,7 @@ const { attachWorkspace, isBlocked, limited, clientIp } = require('./lib/workspa
 
 const app = express();
 const PORT = process.env.PORT || 3210;
-const ASSET_VER = process.env.ASSET_VER || 'v19';
+const ASSET_VER = process.env.ASSET_VER || 'v20';
 const bootAt = Date.now();
 
 app.use(express.json({ limit: '50mb' }));
@@ -810,6 +810,7 @@ app.delete('/api/feed/:id', (req, res) => {
   lists.feed.items = lists.feed.items.filter((i) => i.id !== req.params.id);
   persistList('feed');
   removeUploadDir(req.params.id);
+  if (global.__cplusOnWorkspaceChange) global.__cplusOnWorkspaceChange(req.workspaceId);
   res.json({ success: true, items: lists.feed.items.map(withImageUrls), style: analyzeFeed(lists.feed.items) });
 });
 

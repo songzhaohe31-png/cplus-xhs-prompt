@@ -302,8 +302,8 @@ async function boot() {
   state.feed = state.feed || [];
   state.settings = state.settings || {};
   const asked = new URLSearchParams(location.search).get('p');
-  const allowed = ['home', 'facts', 'samples', 'style', 'rules', 'topics', 'produce', 'schedule', 'reports', 'chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
-  page = allowed.includes(asked) ? asked : 'home';
+  const allowed = ['learn', 'studio', 'results', 'home', 'facts', 'samples', 'style', 'rules', 'topics', 'produce', 'schedule', 'reports', 'chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
+  page = allowed.includes(asked) ? asked : 'learn';
   draw();
 }
 

@@ -102,6 +102,9 @@ body { background: var(--bg); color: var(--ink); }
 .swatch-row { display: flex; gap: 8px; margin: 8px 0 16px; }
 .swatch { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--line); display: inline-block; }
 button[disabled] { opacity: .45; pointer-events: none; }
+.drop-zone { border: 2px dashed var(--line); }
+.poster-preview { width: min(280px, 100%); border-radius: 12px; margin: 10px 0; display: block; }
+.inline-post { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .chat-log { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
 .bubble {
   border-radius: 14px;

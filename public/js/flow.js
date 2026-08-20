@@ -1,18 +1,11 @@
-state.readiness = state.readiness || { percent: 0, facts: 0, captions: 0, posters: 0, analyzed: false, confirmed: false, next: 'upload', canGenerate: false };
+state.readiness = state.readiness || { status: '尚未上传资料', facts: 0, captions: 0, posters: 0, analyzed: false, confirmed: false, canGenerate: false, stale: false };
 state.dna = state.dna || { fields: {}, confirmed: false };
 state.series = state.series || [];
 state.generalMode = false;
-state.homeSeries = '';
-
-const FLOW_PAGES = ['home', 'facts', 'samples', 'style', 'rules', 'topics', 'produce', 'schedule', 'reports'];
-
-function readinessLabel(p) {
-  if (p >= 100) return '可以正式生成';
-  if (p >= 75) return '请确认账号规则';
-  if (p >= 50) return '请开始风格分析';
-  if (p >= 25) return '请补充历史文案和海报';
-  return '请先上传资料';
-}
+state.topics = state.topics || [];
+state.expanded = state.expanded || {};
+state.advancedOpen = false;
+const FLOW_PAGES = ['learn', 'studio', 'results', 'home', 'facts', 'samples', 'style', 'rules', 'topics', 'produce', 'schedule', 'reports'];
 
 function paintChrome() {
   const foot = document.getElementById('sideFoot');
@@ -21,272 +14,189 @@ function paintChrome() {
   if (top) top.innerHTML = '';
 }
 
-function viewHome() {
+function lockNote() {
   const r = state.readiness || {};
-  const p = r.percent || 0;
-  const steps = [
-    ['facts', '1. 建立资料库', r.facts > 0],
-    ['samples', '2. 分析账号风格', r.captions > 0 || r.posters > 0],
-    ['topics', '3. 规划内容主题', r.confirmed],
-    ['produce', '4. 生成图文', r.canGenerate],
-    ['reports', '5. 导出成果', (state.contents || []).length > 0]
-  ];
-  const cta = !r.facts && !r.captions
-    ? `<button class="btn" onclick="go('facts')">开始上传资料</button>
-       <button class="btn quiet" onclick="enableGeneralMode()">仅使用通用模式测试</button>`
-    : !r.analyzed
-      ? `<button class="btn" onclick="go('style')">开始AI风格分析</button>`
-      : !r.confirmed
-        ? `<button class="btn" onclick="go('rules')">确认账号风格</button>`
-        : `<button class="btn" onclick="go('topics')">生成内容主题</button>
-           <button class="btn ghost" onclick="go('produce')">生成完整图文</button>`;
+  if (r.canGenerate) return '';
+  if (r.stale) return `<div class="warn">资料已变更，旧分析已失效。请重新分析并确认后再生成正式内容。</div>`;
+  if (r.facts < 1) return `<div class="warn">现有资料不足，无法生成正式内容。请先到学习中心上传业务资料。</div>`;
+  if (r.captions < 3) return `<div class="warn">风格样本不足。请至少上传3篇历史文案。没有海报时仍可生成文案，但不会使用历史海报风格。</div>`;
+  if (!r.analyzed || !r.confirmed) return `<div class="warn">请先完成风格分析并确认。</div>`;
+  return '';
+}
+
+function viewLearn() {
+  const r = state.readiness || {};
+  const d = state.dna || {};
+  const f = d.fields || {};
+  const items = state.knowledge || [];
+  const feed = state.feed || [];
+  const copy = d.copy || {};
+  const visual = d.visual || {};
   return `
-    <h1>工作台</h1>
-    <p class="lead">先建立资料和风格，再生成CPLUS正式内容。不要跳过资料库直接写稿。</p>
-    <div class="ready-bar"><span style="width:${p}%"></span></div>
-    <p class="ready-meta">AI准备度 ${p}% · ${esc(readinessLabel(p))}</p>
-    <section class="panel">
-      <h2>资料准备状态</h2>
-      <ul class="status-list">
-        <li>业务资料：已上传 ${r.facts || 0} 份</li>
-        <li>历史文案：已上传 ${r.captions || 0} 篇</li>
-        <li>海报样本：已上传 ${r.posters || 0} 张</li>
-        <li>已完成风格分析：${r.analyzed ? '是' : '否'}</li>
-        <li>已确认账号规则：${r.confirmed ? '是' : '否'}</li>
-      </ul>
-      ${p < 100 ? `<div class="warn">请先上传公司资料、历史文案或海报样本。AI完成资料分析后，才能按照CPLUS的真实业务和账号风格生成内容。</div>` : ''}
-      ${state.generalMode ? `<div class="warn">通用模式不会使用CPLUS专属资料及历史风格，生成结果仅供测试。</div>` : ''}
-      <div class="result-actions">${cta}</div>
+    <h1>AI学习中心</h1>
+    <p class="lead">先上传CPLUS业务资料和历史内容。AI将学习业务事实、语言风格、正文结构、Hashtag及海报排版规律。</p>
+    <p class="ready-meta">${esc(r.status || '尚未上传资料')} · 业务资料 ${r.facts || 0} 份 · 历史文案 ${r.captions || 0} 篇 · 海报 ${r.posters || 0} 张</p>
+    <section class="panel drop-zone" id="dropZone">
+      <h2>上传资料</h2>
+      <p>把文件拖到这里，或点选。可一次选多个：PDF / Word / Excel / 文案 / 海报。系统会自动判断类型。</p>
+      <input id="batchFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.webp">
+      <div class="field"><label>也可直接粘贴文案或网页文字</label><textarea id="pasteText" rows="4" placeholder="小红书Caption、公众号段落或网址说明"></textarea></div>
+      <div class="result-actions">
+        <button class="btn" onclick="uploadBatch()">上传并识别</button>
+      </div>
     </section>
-    <div class="step-row">
-      ${steps.map(([pg, lab, on]) => `<button class="step-card ${on ? 'ok' : ''}" onclick="go('${pg}')">${esc(lab)}</button>`).join('')}
+    <section>
+      <h2>已学习的资料</h2>
+      ${renderLearnItems(items, feed)}
+    </section>
+    <div class="result-actions">
+      <button class="btn" onclick="runStyleAnalyze()" ${r.canAnalyze ? '' : 'disabled'}>分析CPLUS账号风格</button>
     </div>
+    <div id="analyzeProgress" class="progress hidden"></div>
+    ${d.analyzedAt && !r.stale ? renderStyleSummary(d, copy, visual, r) : (r.stale ? `<div class="warn">旧分析已失效，请重新分析。</div>` : '')}
   `;
 }
 
-function enableGeneralMode() {
-  state.generalMode = true;
-  toast('已进入通用测试模式，结果不能当作正式内容');
+function renderLearnItems(items, feed) {
+  const cards = [];
+  items.forEach((k) => {
+    cards.push(`<article class="result-card">
+      <h3>${esc(k.name)}</h3>
+      <p>${esc(k.label || (k.zone === 'sample' ? '历史文案' : '业务资料'))} · ${esc(k.business || '')}</p>
+      <p>提取状态：${esc(k.status || '')} · 事实约 ${esc(k.factCount || 0)} 条${k.timely ? ' · 可能有时效性' : ''}${k.needsConfirm ? ' · 需人工确认分类' : ''}</p>
+      ${k.facts ? `<p>${esc(k.facts)}</p>` : ''}
+      <div class="result-actions"><button class="btn quiet small" onclick="delKnowledge('${k.id}')">删除</button></div>
+    </article>`);
+  });
+  feed.forEach((f) => {
+    cards.push(`<article class="result-card">
+      ${f.images && f.images[0] && f.images[0].url ? `<img src="${esc(f.images[0].url)}" alt="" style="width:96px;border-radius:8px">` : ''}
+      <h3>${esc((f.caption || '').split('\n')[0].slice(0, 32) || '历史帖子')}</h3>
+      <p>历史帖子（文案${f.images && f.images.length ? '+海报' : ''}）</p>
+      <p>${esc((f.caption || '').slice(0, 140))}</p>
+      <div class="result-actions"><button class="btn quiet small" onclick="delFeed('${f.id}')">删除</button></div>
+    </article>`);
+  });
+  return cards.join('') || '<div class="empty">还没有资料。把文件拖进来即可。</div>';
+}
+
+function renderStyleSummary(d, copy, visual, r) {
+  const f = d.fields || {};
+  const ev = d.evidence || {};
+  const rows = [
+    ['账号定位', f.positioning],
+    ['目标客户', f.audience],
+    ['品牌语气', f.tone],
+    ['标题规律', f.titleFormula || ('平均' + (copy.titleLen || '-') + '字（依据' + (copy.n || ev.captions || 0) + '篇文案）')],
+    ['开场规律', f.hookFormula],
+    ['正文结构', f.bodyStructure || ('平均' + (copy.avgChars || '-') + '字，约' + (copy.avgParas || '-') + '段')],
+    ['CTA规律', f.ctaRule],
+    ['Hashtag规律', f.hashtagRule || copy.hashtags],
+    ['视觉规律', (visual && visual.insufficient) ? '尚未上传海报，无法分析视觉风格。' : f.posterLayout],
+    ['推荐内容比例', f.mix],
+    ['禁用表达', f.banned]
+  ];
+  return `<section class="panel">
+    <h2>CPLUS账号风格摘要</h2>
+    <p class="hint">标题平均字数 ${esc(copy.titleLen || '-')} · 正文平均 ${esc(copy.avgChars || '-')} 字 · 依据 ${esc(String(copy.n || ev.captions || 0))} 篇历史Caption · 置信度 ${Number(copy.n) >= 5 ? '高' : (Number(copy.n) >= 3 ? '中' : '低')}</p>
+    ${visual && visual.insufficient ? `<div class="warn">尚未上传海报，无法分析视觉风格。如需专属海报风格，请至少再上传3张历史海报。</div>` : ''}
+    ${rows.map(([lab, val]) => val ? `<div class="field-line"><span>${esc(lab)}</span>${esc(val)}</div>` : '').join('')}
+    <div class="result-actions">
+      <button class="btn" onclick="confirmDna()">确认并开始创作</button>
+      <button class="btn ghost" onclick="runStyleAnalyze()">重新分析</button>
+      <button class="btn quiet" onclick="state.advancedOpen=!state.advancedOpen; draw()">${state.advancedOpen ? '收起高级修改' : '高级修改'}</button>
+    </div>
+    ${state.advancedOpen ? renderAdvanced() : ''}
+  </section>`;
+}
+
+function renderAdvanced() {
+  const f = (state.dna && state.dna.fields) || {};
+  return `<div class="panel" style="margin-top:12px">${[
+    ['positioning', '账号定位'], ['audience', '目标客户'], ['tone', '品牌语气'],
+    ['titleFormula', '标题规律'], ['hookFormula', '开场规律'], ['bodyStructure', '正文结构'],
+    ['ctaRule', 'CTA'], ['hashtagRule', 'Hashtag'], ['banned', '禁用表达']
+  ].map(([k, lab]) => `<div class="field"><label>${esc(lab)}</label><textarea id="dna_${k}" rows="2">${esc(f[k] || '')}</textarea></div>`).join('')}
+  <button class="btn ghost" onclick="saveDnaFields()">保存修改</button></div>`;
+}
+
+async function uploadBatch() {
+  const input = document.getElementById('batchFiles');
+  const files = input && input.files ? [...input.files] : [];
+  const paste = val('pasteText');
+  if (!files.length && !paste) { toast('请选择文件或粘贴文字', true); return; }
+  busy(true, '正在读取资料');
+  try {
+    for (const file of files) {
+      const dataUrl = await readFileData(file);
+      const textGuess = /\.txt$/i.test(file.name) ? '' : '';
+      await post('/api/knowledge', {
+        name: file.name,
+        filename: file.name,
+        mime: file.type,
+        dataUrl,
+        text: textGuess
+      });
+      if (/^image\//.test(file.type)) {
+        await post('/api/feed', [{ caption: paste || file.name, images: [{ name: file.name, mime: file.type, dataUrl }] }]);
+      }
+    }
+    if (paste && !files.length) {
+      await post('/api/knowledge', { name: '粘贴文案', text: paste, mime: 'text/plain' });
+      if ((paste.match(/#/g) || []).length >= 2) {
+        await post('/api/feed', [{ caption: paste }]);
+      }
+    }
+    await reloadLearn();
+    toast('已上传，可继续添加或开始分析');
+  } catch (e) { toast(e.message, true); }
+  finally { busy(false); }
+}
+
+async function reloadLearn() {
+  const [k, f, b] = await Promise.all([
+    api('/api/knowledge').catch(() => ({ items: [] })),
+    api('/api/feed').catch(() => ({ items: [] })),
+    api('/api/bootstrap').catch(() => ({}))
+  ]);
+  state.knowledge = k.items || [];
+  state.feed = f.items || [];
+  if (b.readiness) state.readiness = b.readiness;
+  if (b.dna) state.dna = b.dna;
   draw();
 }
 
-function viewFacts() {
-  const items = (state.knowledge || []).filter((k) => k.zone !== 'sample');
-  return `
-    <h1>业务资料</h1>
-    <p class="lead">上传画册、服务介绍、官网、公众号、牌照与监管资料。生成正式内容前必须有事实基础。</p>
-    <div class="kb-grid">
-      <section class="panel">
-        <h2>上传事实资料</h2>
-        <div class="field"><label>文件名称</label><input id="k_name"></div>
-        <div class="row">
-          <div class="field"><label>资料类型</label><input id="k_category" placeholder="画册 / 官网 / 公众号 / 牌照 / FAQ"></div>
-          <div class="field"><label>业务分类</label>
-            <select id="k_business">${seriesOptions()}</select>
-          </div>
-        </div>
-        <div class="row">
-          <div class="field"><label>司法管辖区</label><input id="k_jurisdiction" value="香港"></div>
-          <div class="field"><label>内容日期</label><input id="k_cdate" type="date"></div>
-        </div>
-        <div class="field"><label>时效性</label><div class="chips"><button class="chip" id="k_timely" onclick="this.classList.toggle('on')">有时效，需更新</button></div></div>
-        <div class="field"><label>文件（PDF / Word / Excel / TXT）</label><input id="k_file" type="file"></div>
-        <div class="field"><label>或粘贴文章 / 网址</label><textarea id="k_text" rows="4"></textarea></div>
-        <div class="actions"><button class="btn" onclick="uploadKnowledgeZone('facts')">保存到业务资料</button></div>
-      </section>
-      <section>
-        ${items.slice().reverse().map((k) => `
-          <article class="result-card">
-            <h3>${esc(k.name)}</h3>
-            <p>${esc(k.category || '')} · ${esc(k.business || '')} · ${esc(k.jurisdiction || '')}</p>
-            ${k.facts ? `<p>${esc(k.facts)}</p>` : ''}
-            <div class="meta">${esc(whenFull(k.uploadedAt))} · ${esc(k.status || '')}${k.contentDate ? ' · 内容日期 ' + esc(k.contentDate) : ''}${k.timely ? ' · 有时效' : ''}</div>
-          </article>
-        `).join('') || '<div class="empty">还没有业务资料。请先上传画册或服务介绍。</div>'}
-      </section>
-    </div>
-  `;
-}
-
-function seriesOptions(selected) {
-  const list = state.series && state.series.length ? state.series : [
-    { id: 'hk-company', name: '香港公司注册及秘书服务' },
-    { id: 'hk-mso', name: '香港MSO' }
-  ];
-  return list.map((s) => `<option value="${esc(s.name)}" ${s.name === selected ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
-}
-
-async function uploadKnowledgeZone(zone) {
-  const file = document.getElementById('k_file') && document.getElementById('k_file').files[0];
-  const payload = {
-    zone: zone === 'sample' ? 'sample' : 'facts',
-    name: val('k_name') || (file && file.name) || '未命名资料',
-    category: val('k_category'),
-    business: val('k_business'),
-    jurisdiction: val('k_jurisdiction') || '香港',
-    contentDate: val('k_cdate'),
-    timely: !!(document.getElementById('k_timely') && document.getElementById('k_timely').classList.contains('on')),
-    text: val('k_text') || val('s_caption'),
-    caption: val('s_caption'),
-    rating: val('s_rating'),
-    note: val('s_note'),
-    filename: file ? file.name : '',
-    mime: file ? file.type : 'text/plain'
-  };
-  if (file) payload.dataUrl = await readFileData(file);
-  if (!payload.dataUrl && !payload.text && !payload.caption) { toast('请上传文件或粘贴文本', true); return; }
-  busy(true, '在解析资料');
-  try {
-    const res = await post('/api/knowledge', payload);
-    state.knowledge = res.items || [];
-    await refreshReady();
-    draw();
-    toast('已保存');
-  } catch (e) { toast(e.message, true); }
-  finally { busy(false); }
-}
-
-function viewSamples() {
-  const samples = (state.knowledge || []).filter((k) => k.zone === 'sample');
-  const feed = state.feed || [];
-  return `
-    <h1>历史文案与海报</h1>
-    <p class="lead">同一条帖子请把海报和Caption一起保存，供风格学习。</p>
-    <section class="panel">
-      <h2>上传一条已发布内容</h2>
-      <div class="field"><label>内容主题</label><input id="s_topic"></div>
-      <div class="row">
-        <div class="field"><label>业务分类</label><select id="k_business">${seriesOptions()}</select></div>
-        <div class="field"><label>发布时间</label><input id="k_cdate" type="date"></div>
-      </div>
-      <div class="field"><label>小红书Caption</label><textarea id="s_caption" rows="5"></textarea></div>
-      <div class="row">
-        <div class="field"><label>数据表现</label>
-          <select id="s_rating"><option value="">未标</option><option value="good">较好</option><option value="ok">一般</option><option value="bad">较差</option></select>
-        </div>
-        <div class="field"><label>是否值得模仿</label>
-          <select id="s_note"><option value="">未标</option><option value="模仿">值得模仿</option><option value="避开">不要模仿</option></select>
-        </div>
-      </div>
-      <div class="field"><label>海报图片</label><input id="s_img" type="file" accept="image/*"></div>
-      <div class="actions"><button class="btn" onclick="uploadSamplePost()">绑定保存海报和文案</button></div>
-    </section>
-    ${(feed.slice().reverse().map((f) => `
-      <article class="result-card">
-        ${f.images && f.images[0] && f.images[0].url ? `<img src="${esc(f.images[0].url)}" alt="" style="width:120px;border-radius:8px;margin-bottom:8px">` : ''}
-        <h3>${esc((f.caption || '').split('\n')[0].slice(0, 36) || '样本')}</h3>
-        <p>${esc((f.caption || '').slice(0, 160))}</p>
-        <div class="meta">${esc(f.rating || '')} ${esc(f.note || '')}</div>
-      </article>
-    `).join('') + samples.map((k) => `
-      <article class="result-card"><h3>${esc(k.name)}</h3><p>${esc(k.facts || k.caption || '')}</p></article>
-    `).join('')) || '<div class="empty">还没有历史样本。建议上传3至5篇。</div>'}
-  `;
-}
-
-async function uploadSamplePost() {
-  const file = document.getElementById('s_img') && document.getElementById('s_img').files[0];
-  const caption = val('s_caption');
-  if (!caption && !file) { toast('请至少提供文案或海报', true); return; }
-  busy(true, '保存样本');
-  try {
-    const images = [];
-    if (file) images.push({ name: file.name, mime: file.type, dataUrl: await readFileData(file) });
-    await post('/api/feed', [{
-      caption,
-      rating: val('s_rating'),
-      note: val('s_note'),
-      topic: val('s_topic'),
-      images
-    }]);
-    const feed = await api('/api/feed');
-    state.feed = feed.items || [];
-    await refreshReady();
-    draw();
-    toast('已绑定保存');
-  } catch (e) { toast(e.message, true); }
-  finally { busy(false); }
-}
-
-function viewStyle() {
-  const d = state.dna || {};
-  const r = state.readiness || {};
-  const copy = d.copy || {};
-  const visual = d.visual || {};
-  const strategy = d.strategy || {};
-  return `
-    <h1>账号风格分析</h1>
-    <p class="lead">分析历史文案和海报，生成CPLUS账号风格DNA。完整分析过程不会显示给用户。</p>
-    <div class="result-actions">
-      <button class="btn" onclick="runStyleAnalyze()" ${r.facts + r.captions + r.posters ? '' : 'disabled'}>开始分析账号风格</button>
-      <button class="btn ghost" onclick="exportStylePdf()">导出风格分析PDF</button>
-      <button class="btn ghost" onclick="exportVisualPdf()">导出海报规律PDF</button>
-    </div>
-    ${!d.analyzedAt ? `<div class="warn">尚未建立账号风格。可以先上传3至5篇历史文案及海报，或使用通用风格生成测试稿。</div>` : ''}
-    ${d.analyzedAt ? `
-      <h2>文案风格</h2>
-      <div class="dna-grid">${[['script','文字'],['formality','专业程度'],['spoken','口语化'],['titleLen','标题字数'],['hooks','开场钩子'],['avgChars','平均字数'],['emoji','Emoji'],['hashtags','Hashtag'],['banned','禁用']].map(([k,l]) => copy[k] ? `<article class="result-card"><div class="kicker">${esc(l)}</div><p>${esc(copy[k])}</p></article>` : '').join('')}</div>
-      <h2>海报视觉</h2>
-      <div class="dna-grid">${[['ratio','比例'],['size','尺寸'],['colors','色彩'],['layout','版式'],['logo','Logo'],['density','密度']].map(([k,l]) => visual[k] ? `<article class="result-card"><div class="kicker">${esc(l)}</div><p>${esc(visual[k])}</p></article>` : '').join('')}</div>
-      <div class="swatch-row">${swatches(visual.colors)}</div>
-      <h2>内容策略</h2>
-      <div class="dna-grid">${[['themes','主题'],['repeatRisk','重复风险'],['highPerform','高表现共性'],['nextTopics','可发展方向']].map(([k,l]) => strategy[k] ? `<article class="result-card"><div class="kicker">${esc(l)}</div><p>${esc(strategy[k])}</p></article>` : '').join('')}</div>
-      <div class="result-actions"><button class="btn" onclick="go('rules')">去确认账号风格</button></div>
-    ` : ''}
-  `;
-}
-
-function swatches(colors) {
-  const list = String(colors || '').split(/[,，、/\s]+/).filter((c) => /^#?[0-9a-fA-F]{6}$/.test(c) || /海军|钴蓝|白|金|青绿/.test(c));
-  const map = { '海军蓝': '#1a4b8c', '钴蓝': '#2f6fb5', '白': '#ffffff', '金': '#c4a35a', '青绿': '#1aa6a6' };
-  return list.slice(0, 6).map((c) => {
-    const hex = c.startsWith('#') ? c : (map[c] || '#1a4b8c');
-    return `<span class="swatch" style="background:${hex}" title="${esc(c)}"></span>`;
-  }).join('');
+async function delFeed(id) {
+  if (!confirm('删除这条历史帖子？')) return;
+  await del('/api/feed/' + id);
+  await reloadLearn();
 }
 
 async function runStyleAnalyze() {
-  busy(true, '正在分析账号风格');
+  const box = document.getElementById('analyzeProgress');
+  const steps = ['正在读取资料', '正在提取业务事实', '正在分析文案结构', '正在分析Hashtag', '正在分析海报版式', '正在整理分析结果'];
+  if (box) { box.classList.remove('hidden'); box.textContent = steps[0]; }
+  let i = 0;
+  const t = setInterval(() => {
+    i = Math.min(i + 1, steps.length - 1);
+    if (box) box.textContent = steps[i];
+  }, 2500);
+  busy(true, '正在分析');
   try {
     const res = await post('/api/dna/analyze', {});
     state.dna = res.dna;
     state.readiness = res.readiness || state.readiness;
     draw();
-    toast('风格分析已完成，请确认规则');
+    toast('分析完成，请确认后开始创作');
   } catch (e) { toast(e.message, true); }
-  finally { busy(false); }
-}
-
-function viewRules() {
-  const f = (state.dna && state.dna.fields) || {};
-  const labels = [
-    ['positioning', '账号定位'], ['audience', '目标客户'], ['tone', '品牌语气'],
-    ['titleFormula', '标题公式'], ['hookFormula', '开场公式'], ['bodyStructure', '正文结构'],
-    ['ctaRule', 'CTA规则'], ['hashtagRule', 'Hashtag规则'], ['posterColors', '海报色彩'],
-    ['posterLayout', '海报版式'], ['imageElements', '图片元素'], ['mix', '内容类型比例'],
-    ['banned', '禁用表达'], ['directions', '推荐内容方向']
-  ];
-  return `
-    <h1>已确认风格规则</h1>
-    <p class="lead">确认后的风格DNA会在之后每次正式生成时自动调用。不会显示系统提示词。</p>
-    ${labels.map(([k, lab]) => `
-      <div class="field"><label>${esc(lab)}</label>
-        <textarea id="dna_${k}" rows="2">${esc(f[k] || '')}</textarea>
-        <button class="btn quiet small" onclick="document.getElementById('dna_${k}').value='';">删除此项</button>
-      </div>
-    `).join('')}
-    <div class="result-actions">
-      <button class="btn ghost" onclick="saveDnaFields()">保存修改</button>
-      <button class="btn" onclick="confirmDna()">确认账号风格</button>
-      <button class="btn quiet" onclick="runStyleAnalyze()">重新分析</button>
-    </div>
-  `;
+  finally { clearInterval(t); busy(false); }
 }
 
 async function saveDnaFields() {
   const fields = {};
-  ['positioning','audience','tone','titleFormula','hookFormula','bodyStructure','ctaRule','hashtagRule','posterColors','posterLayout','imageElements','mix','banned','directions'].forEach((k) => {
-    fields[k] = val('dna_' + k);
+  ['positioning','audience','tone','titleFormula','hookFormula','bodyStructure','ctaRule','hashtagRule','banned'].forEach((k) => {
+    const el = document.getElementById('dna_' + k);
+    if (el) fields[k] = el.value;
   });
   const res = await post('/api/dna', { fields });
   state.dna = res.dna;
@@ -294,191 +204,265 @@ async function saveDnaFields() {
 }
 
 async function confirmDna() {
-  await saveDnaFields();
+  if (state.advancedOpen) await saveDnaFields();
   const res = await post('/api/dna/confirm', {});
   state.dna = res.dna;
   state.readiness = res.readiness || state.readiness;
-  toast('风格规则已确认，可以正式生成');
-  go('topics');
+  toast('已确认，可以开始创作');
+  go('studio');
 }
 
-function viewTopics() {
+function viewStudio() {
   const r = state.readiness || {};
-  const locked = !r.canGenerate && !state.generalMode;
+  const topics = state.topics || [];
   return `
-    <h1>主题规划</h1>
-    <p class="lead">基于资料库和已确认风格生成选题。确认主题后再写完整文案。</p>
-    ${locked ? lockBanner() : ''}
-    <div class="field"><label>业务系列</label><select id="topic_series">${seriesOptions()}</select></div>
-    <div class="field"><label>补充说明（可选）</label><textarea id="topic_note" rows="2" placeholder="例如：重点推年审和开户"></textarea></div>
+    <h1>内容制作中心</h1>
+    <p class="lead">用一句话说本月重点。AI根据已学习的资料和风格生成主题，再直接在卡片里写成文案和海报。</p>
+    ${lockNote()}
+    ${!r.canAnalyzeVisual && r.canGenerate ? `<p class="hint">未上传足够海报，将使用通用模板海报，不会冒充CPLUS历史海报风格。</p>` : ''}
+    <div class="field"><textarea id="studio_msg" rows="3" placeholder="例如：下个月重点推广香港公司注册和MSO，每周3篇。">${esc(lastCommand || '')}</textarea></div>
     <div class="result-actions">
-      <button class="btn" ${locked ? 'disabled' : ''} onclick="generateTopics()">生成内容主题</button>
-      ${!r.canGenerate ? `<button class="btn quiet" onclick="enableGeneralMode(); generateTopics(true)">通用模式测试</button>` : ''}
+      <button class="btn" ${r.canGenerate || state.generalMode ? '' : 'disabled'} onclick="planStudio()">生成主题规划</button>
+      ${!r.canGenerate ? `<button class="btn quiet" onclick="state.generalMode=true; toast('测试稿不会当作正式内容'); planStudio()">仅测试</button>` : ''}
+      ${topics.length ? `<button class="btn ghost" onclick="exportSchedulePdf()">导出排期PDF</button>` : ''}
     </div>
-    <div id="chatProgress" class="progress hidden">准备中…</div>
-    <div id="topicBox">${renderTopicList()}</div>
-    <div id="streamOut" class="safe-text"></div>
+    <div id="chatProgress" class="progress hidden"></div>
+    <div id="topicList">${topics.map((it, i) => topicCard(it, i)).join('')}</div>
   `;
 }
 
-function lockBanner() {
-  const r = state.readiness || {};
-  if (!r.facts) return `<div class="warn">缺少相关业务资料，暂时不能生成正式内容。请先上传相关服务资料或官方来源。<div class="result-actions"><button class="btn" onclick="go('facts')">上传资料</button></div></div>`;
-  return `<div class="warn">尚未建立账号风格。可以先上传3至5篇历史文案及海报，或使用通用风格生成测试稿。<div class="result-actions"><button class="btn" onclick="go('samples')">上传样本</button> <button class="btn ghost" onclick="go('style')">去分析</button></div></div>`;
-}
-
-function renderTopicList() {
-  const items = (state.lastStructured && state.lastStructured.type === 'schedule' && state.lastStructured.items) || [];
-  if (!items.length) return '<div class="hint">生成后将列出主题、封面标题、类型、客户和参考方向。</div>';
-  return renderSchedule(state.lastStructured);
-}
-
-async function generateTopics(forceGeneral) {
-  const note = val('topic_note');
-  const series = val('topic_series');
-  const msg = '生成未来4周的小红书内容排期，每周3篇。业务系列：' + series + (note ? '。' + note : '');
-  const el = document.getElementById('chatMsg');
-  if (el) el.value = msg;
-  if (forceGeneral) state.generalMode = true;
-  page = 'topics';
-  await runGenerate(msg);
-}
-
-function viewProduce() {
-  const r = state.readiness || {};
-  const locked = !r.canGenerate && !state.generalMode;
-  return `
-    <h1>图文生成</h1>
-    <p class="lead">确认主题后，按已学习的语言和海报规律生成完整小红书图文。</p>
-    ${locked ? lockBanner() : ''}
-    ${state.generalMode ? `<div class="warn">通用模式不会使用CPLUS专属资料及历史风格，生成结果仅供测试。</div>` : ''}
-    <div class="field"><label>一句话指令</label><textarea id="prod_msg" rows="3" placeholder="写一篇香港公司年审避坑的小红书。">${esc(lastCommand || '')}</textarea></div>
+function topicCard(it, i) {
+  const exp = state.expanded[i];
+  return `<article class="result-card topic-card" id="topic-${i}">
+    <div class="kicker">${esc(formatDateZh(it.publishAt) || it.publishAt || '')} · ${esc(it.contentType || it.type || '')}</div>
+    <h3>${esc(it.title || '')}</h3>
+    ${it.audience ? `<p>目标客户：${esc(it.audience)}</p>` : ''}
+    ${it.pain ? `<p>角度：${esc(it.pain)}</p>` : ''}
+    ${it.sourcesText ? `<p>参考资料：${esc(it.sourcesText)}</p>` : ''}
     <div class="result-actions">
-      <button class="btn" ${locked ? 'disabled' : ''} onclick="generateOne()">生成完整图文</button>
-      <button class="btn ghost" ${locked ? 'disabled' : ''} onclick="generateWeek()">生成本周3篇</button>
+      <button class="btn" onclick="generateThis(${i})">生成这篇</button>
+      <button class="btn quiet small" onclick="removeTopic(${i})">删除</button>
     </div>
-    <div id="chatProgress" class="progress hidden">准备中…</div>
-    <div id="streamOut" class="safe-text"></div>
-    <div id="produceOut">${state.lastStructured && state.lastStructured.items ? renderStructured(state.lastStructured) : ''}</div>
-  `;
+    ${exp ? renderInlinePost(exp, i) : ''}
+  </article>`;
 }
 
-async function generateOne() {
-  const msg = val('prod_msg') || '写一篇香港公司年审避坑的小红书，只生成一篇。';
-  await runGenerate(msg);
+function renderInlinePost(item, i) {
+  const body = cleanVisibleText(item.body || '');
+  const poster = item.posterDataUrl;
+  return `<div class="inline-post">
+    ${item.title ? `<h3>${esc(item.title)}</h3>` : ''}
+    ${item.subtitle ? `<p class="points">${esc(item.subtitle)}</p>` : ''}
+    ${body ? `<div class="safe-text">${esc(body)}</div>` : ''}
+    ${item.cta ? `<p class="cta">${esc(item.cta)}</p>` : ''}
+    ${item.hashtags ? `<p class="tags">${esc(item.hashtags)}</p>` : ''}
+    ${item.sourcesText ? `<p>参考资料：${esc(item.sourcesText)}</p>` : ''}
+    ${item.pendingConfirm ? `<p>待人工确认：${esc(item.pendingConfirm)}</p>` : ''}
+    ${poster ? `<img class="poster-preview" src="${esc(poster)}" alt="海报预览">` : ''}
+    <div class="result-actions">
+      <button class="btn ghost small" onclick="copyCaption(${i})">复制Caption</button>
+      <button class="btn quiet small" onclick="rewriteInline(${i},'title')">重写标题</button>
+      <button class="btn quiet small" onclick="rewriteInline(${i},'body')">缩短正文</button>
+      <button class="btn quiet small" onclick="downloadInlinePoster(${i})">下载PNG</button>
+      <button class="btn quiet small" onclick="saveInline(${i})">保存到成果中心</button>
+    </div>
+  </div>`;
 }
 
-async function generateWeek() {
-  await runGenerate('生成本周3篇香港MSO内容。');
-}
-
-async function runGenerate(message) {
+async function planStudio() {
+  const message = val('studio_msg') || '生成未来4周的小红书内容排期，每周3篇。';
   lastCommand = message;
-  page = page === 'topics' ? 'topics' : 'produce';
   chatBusy = true;
   chatAbort = new AbortController();
-  const bot = { role: 'bot', text: '', time: whenFull(new Date().toISOString()), streaming: true, html: '<div id="streamOut" class="safe-text"></div>' };
-  state.chatLog.push({ role: 'user', text: message, time: bot.time });
-  state.chatLog.push(bot);
-  draw();
-  setProgress('正在准备资料…');
-  busy(true, '正在生成');
+  const bot = { role: 'bot', text: '', html: '', time: whenFull(new Date().toISOString()) };
+  busy(true, '正在规划主题');
+  setProgress('正在规划主题…');
   try {
     await runStreamChat(message, bot);
+    const items = (state.lastStructured && state.lastStructured.items) || [];
+    state.topics = items;
+    state.expanded = {};
     draw();
-  } catch (e) {
-    toast((e && e.message) || '生成失败', true);
-    draw();
-  } finally {
-    chatBusy = false;
-    chatAbort = null;
-    busy(false);
-  }
+  } catch (e) { toast(e.message, true); }
+  finally { chatBusy = false; chatAbort = null; busy(false); }
 }
 
-function viewSchedule() {
+async function generateThis(i) {
+  const it = state.topics[i];
+  if (!it) return;
+  const msg = '写一篇小红书，只生成一篇。封面标题：' + (it.title || '') + '。目标客户：' + (it.audience || '') + '。内容类型：' + (it.contentType || '') + '。角度：' + (it.pain || '');
+  chatBusy = true;
+  chatAbort = new AbortController();
+  const bot = { role: 'bot', text: '', html: '<div id="streamOut" class="safe-text"></div>', time: '' };
+  busy(true, '正在生成这篇');
+  try {
+    await runStreamChat(msg, bot);
+    const item = (state.lastStructured && state.lastStructured.items && state.lastStructured.items[0]) || {};
+    item.posterDataUrl = makePosterDataUrl(item);
+    state.expanded[i] = item;
+    lastResult = [item.body, item.cta, item.hashtags].filter(Boolean).join('\n\n');
+    draw();
+  } catch (e) { toast(e.message, true); }
+  finally { chatBusy = false; chatAbort = null; busy(false); }
+}
+
+function removeTopic(i) {
+  state.topics.splice(i, 1);
+  delete state.expanded[i];
+  draw();
+}
+
+function copyCaption(i) {
+  const it = state.expanded[i];
+  if (!it) return;
+  copy([it.body, it.cta, it.hashtags].filter(Boolean).join('\n\n'));
+  toast('已复制Caption');
+}
+
+function downloadInlinePoster(i) {
+  const it = state.expanded[i];
+  if (!it || !it.posterDataUrl) { toast('请先生成这篇', true); return; }
+  const a = document.createElement('a');
+  a.href = it.posterDataUrl;
+  a.download = 'CPLUS-' + (it.title || 'poster').slice(0, 18) + '.png';
+  a.click();
+}
+
+async function saveInline(i) {
+  const it = state.expanded[i];
+  if (!it) return;
+  try {
+    const saved = await post('/api/contents', {
+      title: it.title,
+      subtitle: it.subtitle,
+      body: it.body,
+      cta: it.cta,
+      hashtags: it.hashtags,
+      audience: it.audience,
+      purpose: it.purpose,
+      publishAt: (state.topics[i] && state.topics[i].publishAt) || '',
+      businessCategory: it.contentType,
+      topic: it.title,
+      status: 'Draft'
+    });
+    if (it.posterDataUrl && saved.item) {
+      await post('/api/contents/' + saved.item.id + '/poster', { dataUrl: it.posterDataUrl });
+    }
+    toast('已保存到成果中心');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function rewriteInline(i, field) {
+  const it = state.expanded[i];
+  if (!it) return;
+  const current = field === 'title' ? it.title : it.body;
+  const res = await post('/api/agent/rewrite', { field, instruction: field === 'body' ? '缩短正文，去掉重复CTA和标签' : '重写标题', current });
+  if (field === 'title') it.title = cleanVisibleText(res.reply).split('\n')[0];
+  else it.body = cleanVisibleText(res.reply);
+  it.posterDataUrl = makePosterDataUrl(it);
+  draw();
+}
+
+function makePosterDataUrl(item) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1122;
+  canvas.height = 1402;
+  const g = canvas.getContext('2d');
+  const W = 1122, H = 1402;
+  g.fillStyle = '#f4f7fb';
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = '#1a4b8c';
+  g.fillRect(0, 0, W, 210);
+  g.fillStyle = '#c4a35a';
+  g.fillRect(0, 210, W, 8);
+  g.fillStyle = '#fff';
+  g.font = '600 28px "PingFang SC", sans-serif';
+  g.fillText('CPLUS GROUP', 56, 70);
+  g.font = '20px "PingFang SC", sans-serif';
+  g.fillText('全球业务，合规先行', 56, 110);
+  g.fillStyle = '#10263f';
+  wrapText(g, item.title || '封面标题', 56, 320, W - 112, 58, '700 48px "PingFang SC", sans-serif');
+  const pts = String(item.subtitle || item.points || '').split(/\n|；|;|、/).filter(Boolean).slice(0, 3);
+  pts.forEach((p, idx) => {
+    g.fillStyle = '#1a4b8c';
+    g.fillRect(56, 640 + idx * 120, 10, 70);
+    g.fillStyle = '#10263f';
+    g.font = '32px "PingFang SC", sans-serif';
+    g.fillText(String(p).slice(0, 22), 84, 688 + idx * 120);
+  });
+  g.fillStyle = '#1a4b8c';
+  g.font = '22px "PingFang SC", sans-serif';
+  g.fillText('CPLUS', 56, H - 70);
+  return canvas.toDataURL('image/png');
+}
+
+function viewResults() {
   const items = state.contents || [];
-  const series = val('sch_filter') || '';
-  const rows = items.filter((it) => !series || (it.businessCategory || '') === series);
   return `
-    <h1>内容排期</h1>
-    <p class="lead">清晰列表，不使用复杂月历。</p>
-    <div class="field narrow"><label>筛选业务</label><select id="sch_filter" onchange="draw()"><option value="">全部</option>${seriesOptions()}</select></div>
+    <h1>成果中心</h1>
+    <p class="lead">已保存的文案、海报和排期。导出PDF或PNG给同事使用。</p>
     <div class="schedule-table-wrap"><table class="schedule-table">
-      <thead><tr><th>发布日期</th><th>业务系列</th><th>主题</th><th>封面标题</th><th>类型</th><th>目标客户</th><th>文案</th><th>海报</th></tr></thead>
-      <tbody>${rows.map((it) => `<tr>
-        <td class="col-date">${esc(formatDateZh((it.publishAt || '').slice(0,10)) || it.publishAt || '')}</td>
+      <thead><tr><th>发布日期</th><th>业务</th><th>封面标题</th><th>文案</th><th>海报</th><th></th></tr></thead>
+      <tbody>${items.map((it) => `<tr>
+        <td class="col-date">${esc((it.publishAt || '').slice(0,10))}</td>
         <td>${esc(it.businessCategory || '')}</td>
-        <td>${esc(it.topic || '')}</td>
         <td class="col-title">${esc(it.title || '')}</td>
-        <td>${esc(it.purpose || it.type || '')}</td>
-        <td>${esc(it.audience || '')}</td>
         <td>${it.body ? '已有' : '待写'}</td>
         <td>${it.posterUrl ? '已有' : '待做'}</td>
-      </tr>`).join('') || '<tr><td colspan="8">还没有排期。请先生成主题并保存。</td></tr>'}</tbody>
+        <td><button class="btn quiet small" onclick="openContent('${it.id}')">查看</button></td>
+      </tr>`).join('') || '<tr><td colspan="6">还没有成果。请先在内容制作中心生成并保存。</td></tr>'}</tbody>
     </table></div>
-    <div class="schedule-cards">${rows.map((it) => `<article class="result-card">
-      <div class="kicker">${esc(formatDateZh((it.publishAt || '').slice(0,10)))}</div>
+    <div class="schedule-cards">${items.map((it) => `<article class="result-card">
       <h3>${esc(it.title || '')}</h3>
-      <p>${esc(it.businessCategory || '')} · ${esc(it.audience || '')}</p>
-      <div class="result-actions"><button class="btn ghost small" onclick="openContent('${it.id}')">查看</button></div>
+      <p>${esc((it.publishAt || '').slice(0,10))} · ${esc(it.businessCategory || '')}</p>
+      <button class="btn ghost small" onclick="openContent('${it.id}')">查看</button>
     </article>`).join('')}</div>
     <div class="result-actions">
-      <button class="btn ghost" onclick="exportSchedulePdf()">导出排期PDF</button>
-      <button class="btn ghost" onclick="exportPostsPdf()">导出文案合集PDF</button>
-    </div>
-  `;
-}
-
-function viewReports() {
-  return `
-    <h1>成果导出</h1>
-    <p class="lead">给运营同事的成品是PDF和海报，不是JSON。</p>
-    <div class="dna-grid">
-      <article class="result-card"><h3>账号风格分析报告</h3><button class="btn" onclick="exportStylePdf()">导出PDF</button></article>
-      <article class="result-card"><h3>海报视觉规律报告</h3><button class="btn" onclick="exportVisualPdf()">导出PDF</button></article>
-      <article class="result-card"><h3>未来4周内容排期</h3><button class="btn" onclick="exportSchedulePdf()">导出PDF</button></article>
-      <article class="result-card"><h3>小红书文案合集</h3><button class="btn" onclick="exportPostsPdf()">导出PDF</button></article>
-      <article class="result-card"><h3>单篇图文</h3><button class="btn" onclick="exportDraftPdf()">导出当前草稿PDF</button></article>
-      <article class="result-card"><h3>海报PNG</h3><button class="btn" onclick="go('produce')">去图文生成下载</button></article>
+      <button class="btn" ${items.length ? '' : 'disabled'} onclick="exportSchedulePdf()">导出排期PDF</button>
+      <button class="btn ghost" ${items.some((i) => i.body) ? '' : 'disabled'} onclick="exportPostsPdf()">导出文案合集PDF</button>
+      <button class="btn ghost" ${state.dna && state.dna.analyzedAt ? '' : 'disabled'} onclick="exportStylePdf()">导出风格分析PDF</button>
     </div>
   `;
 }
 
 async function exportStylePdf() {
   const f = (state.dna && state.dna.fields) || {};
+  if (!Object.values(f).some(Boolean)) { toast('还没有可导出的分析', true); return; }
   const rows = Object.keys(f).map((k) => `<h3>${esc(k)}</h3><p>${esc(f[k] || '')}</p>`).join('');
-  await downloadPdf(wrapPdf('CPLUS账号风格分析报告', rows || '<p>请先完成风格分析。</p>'), 'CPLUS-风格分析.pdf');
+  await downloadPdf(wrapPdf('CPLUS账号风格分析报告', rows), 'CPLUS-风格分析.pdf');
 }
 async function exportVisualPdf() {
   const v = (state.dna && state.dna.visual) || {};
-  const rows = Object.keys(v).map((k) => `<h3>${esc(k)}</h3><p>${esc(v[k] || '')}</p>`).join('');
-  await downloadPdf(wrapPdf('CPLUS海报视觉规律分析报告', rows || '<p>请先完成风格分析。</p>'), 'CPLUS-海报规律.pdf');
+  if (v.insufficient) { toast('海报样本不足，不能导出视觉分析', true); return; }
+  const rows = Object.keys(v).map((k) => `<h3>${esc(k)}</h3><p>${esc(String(v[k] || ''))}</p>`).join('');
+  await downloadPdf(wrapPdf('CPLUS海报视觉规律分析报告', rows || '<p>暂无</p>'), 'CPLUS-海报规律.pdf');
 }
 async function exportSchedulePdf() {
-  const items = (state.lastStructured && state.lastStructured.items) || state.contents || [];
-  const table = `<table><thead><tr><th>日期</th><th>标题</th><th>客户</th></tr></thead><tbody>${
-    items.map((it) => `<tr><td>${esc(it.publishAt || '')}</td><td>${esc(it.title || '')}</td><td>${esc(it.audience || '')}</td></tr>`).join('')
+  const items = state.topics.length ? state.topics : (state.contents || []);
+  if (!items.length) { toast('没有可导出的排期', true); return; }
+  const table = `<table><thead><tr><th>日期</th><th>类型</th><th>标题</th></tr></thead><tbody>${
+    items.map((it) => `<tr><td>${esc(it.publishAt || '')}</td><td>${esc(it.contentType || '')}</td><td>${esc(it.title || '')}</td></tr>`).join('')
   }</tbody></table>`;
   await downloadPdf(wrapPdf('未来4周内容排期', table), 'CPLUS-排期.pdf');
 }
 async function exportPostsPdf() {
   const items = (state.contents || []).filter((c) => c.body);
+  if (!items.length) { toast('没有可导出的文案', true); return; }
   const html = items.map((it) => `<h2>${esc(it.title || '')}</h2><p>${esc(it.body || '').replace(/\n/g, '<br>')}</p>`).join('');
-  await downloadPdf(wrapPdf('本周小红书文案合集', html || '<p>还没有成稿。</p>'), 'CPLUS-文案合集.pdf');
+  await downloadPdf(wrapPdf('小红书文案合集', html), 'CPLUS-文案合集.pdf');
 }
 
 async function refreshReady() {
   try {
     const b = await api('/api/bootstrap');
     state.readiness = b.readiness || state.readiness;
-    state.dna = b.dna || state.dna;
+    state.dna = Object.assign({}, state.dna, b.dna || {});
     state.series = b.series || state.series;
     state.me = { mode: b.mode, serviceAvailable: !!b.serviceAvailable };
   } catch (e) {}
 }
 
-const _runStreamChat = runStreamChat;
+const _runStreamChat = typeof runStreamChat === 'function' ? runStreamChat : null;
 runStreamChat = async function (message, bot) {
   setProgress('正在生成内容…');
   const res = await fetch('/api/agent/chat/stream', {
@@ -490,7 +474,7 @@ runStreamChat = async function (message, bot) {
   });
   if (res.status === 403) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || '请先完成资料准备');
+    throw new Error(data.error || '请先完成资料学习');
   }
   if (!res.ok || !res.body) {
     let data = {};
@@ -530,5 +514,15 @@ runStreamChat = async function (message, bot) {
   }
   if (!gotDone && !structured && !cleanVisibleText(full)) throw new Error('结果整理失败，请重新生成');
   finishBot(bot, { reply: full, structured: structured });
-  toast('已生成');
 };
+
+function viewHome() { return viewLearn(); }
+function viewFacts() { return viewLearn(); }
+function viewSamples() { return viewLearn(); }
+function viewStyle() { return viewLearn(); }
+function viewRules() { return viewLearn(); }
+function viewTopics() { return viewStudio(); }
+function viewProduce() { return viewStudio(); }
+function viewSchedule() { return viewResults(); }
+function viewReports() { return viewResults(); }
+function enableGeneralMode() { state.generalMode = true; toast('测试稿不会当作正式内容'); draw(); }
