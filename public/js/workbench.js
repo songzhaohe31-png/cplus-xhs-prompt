@@ -169,7 +169,7 @@ function viewChat() {
   const log = state.chatLog.map((m) => `
     <div class="bubble ${m.role}">
       <div class="meta">${m.role === 'user' ? '你' : 'CPLUS 助理'} · ${esc(m.time || '')}</div>
-      ${m.html || `<div style="white-space:pre-wrap">${esc(m.text || '')}</div>`}
+      ${m.html || (m.text ? `<div class="safe-text">${esc(m.text)}</div>` : '')}
       ${m.dupHint ? `<div class="warn">${esc(m.dupHint)}</div>` : ''}
       ${m.sources && m.sources.length ? `<div class="source-list">来源：${m.sources.map((s) => s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)}</a>` : esc(s.name)).join(' · ')}</div>` : ''}
     </div>
@@ -207,27 +207,112 @@ function fillChat(q) {
   if (el) el.value = q;
 }
 
+function cleanVisibleText(text) {
+  return String(text || '')
+    .replace(/<<<JSON[\s\S]*$/i, '')
+    .replace(/```json[\s\S]*?```/gi, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/(^|\n)\s*\|[^\n]*\|[ \t]*/g, '\n')
+    .replace(/\n?\s*\|?\s*:?-{3,}:?\s*\|[|\s:-]*/g, '\n')
+    .replace(/^\s*[\{\[][\s\S]*[\}\]]\s*$/m, '')
+    .replace(/\n[ \t]+\n/g, '\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function looksLikeJsonDump(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (t.startsWith('{') || t.startsWith('[')) return true;
+  return /<<<JSON|```json|"type"\s*:\s*"schedule"/.test(t);
+}
+
+function formatDateZh(iso) {
+  const m = String(iso || '').match(/^(20\d{2})-(\d{2})-(\d{2})$/);
+  if (!m) return iso || '';
+  return m[1] + '年' + Number(m[2]) + '月' + Number(m[3]) + '日';
+}
+
+function fieldLine(label, value) {
+  if (!value) return '';
+  return `<div class="field-line"><span>${esc(label)}</span>${esc(value)}</div>`;
+}
+
+function resultActions(extra) {
+  return `<div class="result-actions">
+    <button class="btn" onclick="saveStructuredToCalendar()">保存到日历</button>
+    <button class="btn ghost" onclick="saveStructuredToCalendar()">保存到内容库</button>
+    <button class="btn quiet small" onclick="retryLast()">重新生成</button>
+    <button class="btn quiet small" onclick="rewriteField('title')">重写标题</button>
+    <button class="btn quiet small" onclick="rewriteField('body')">重写正文</button>
+    <button class="btn quiet small" onclick="copyLastBody()">复制正文</button>
+    <button class="btn quiet small" onclick="fillChat('根据这篇生成一张海报'); sendChat()">生成海报</button>
+    ${extra || ''}
+  </div>`;
+}
+
+function renderSchedule(structured) {
+  const items = structured.items || [];
+  const rows = items.map((it) => `<tr>
+    <td>${esc(it.week || '')}</td>
+    <td class="col-date">${esc(formatDateZh(it.publishAt) || it.publishAt || '')}</td>
+    <td class="col-title">${esc(it.title || '')}</td>
+    <td>${esc(it.contentType || it.type || '')}</td>
+    <td>${esc(it.audience || '')}</td>
+  </tr>`).join('');
+  const cards = items.map((it) => `<article class="result-card">
+    ${it.week ? `<div class="kicker">${esc(it.week)}</div>` : ''}
+    ${it.publishAt ? `<p>发布日期：${esc(formatDateZh(it.publishAt))}</p>` : ''}
+    ${it.title ? `<h3>${esc(it.title)}</h3>` : ''}
+    ${it.contentType || it.type ? `<p>类型：${esc(it.contentType || it.type)}</p>` : ''}
+    ${it.audience ? `<p>目标客户：${esc(it.audience)}</p>` : ''}
+    ${it.pain ? `<p>痛点：${esc(it.pain)}</p>` : ''}
+    ${it.purpose ? `<p>目的：${esc(it.purpose)}</p>` : ''}
+  </article>`).join('');
+  return `<div class="schedule-wrap">
+    <div class="schedule-table-wrap"><table class="schedule-table">
+      <thead><tr><th>周次</th><th>发布日期</th><th>标题</th><th>类型</th><th>目标客户</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <div class="schedule-cards">${cards}</div>
+    ${resultActions(`<button class="btn ghost" onclick="fillChat('根据刚才的排期，生成本周3篇内容。'); sendChat()">生成本周3篇</button>
+    <button class="btn ghost" onclick="exportStructuredCsv()">导出 Excel</button>`)}
+  </div>`;
+}
+
+function renderPost(it) {
+  const body = cleanVisibleText(it.body || '');
+  return `<article class="result-card post-card">
+    ${it.title ? `<h3>${esc(it.title)}</h3>` : ''}
+    ${it.subtitle ? `<p class="points">${esc(it.subtitle)}</p>` : ''}
+    ${body ? `<div class="safe-text">${esc(body)}</div>` : ''}
+    ${it.cta ? `<p class="cta">${esc(it.cta)}</p>` : ''}
+    ${it.hashtags ? `<p class="tags">${esc(it.hashtags)}</p>` : ''}
+    ${it.sourcesText ? fieldLine('参考来源', it.sourcesText) : ''}
+    ${it.pendingConfirm ? fieldLine('需要人工确认', it.pendingConfirm) : ''}
+    ${it.riskNote ? fieldLine('合规提示', it.riskNote) : ''}
+  </article>`;
+}
+
+function renderPostBatch(structured) {
+  return `<div class="post-batch">${(structured.items || []).map(renderPost).join('')}${resultActions()}</div>`;
+}
+
 function renderStructured(structured) {
   if (!structured || !structured.items || !structured.items.length) return '';
-  const items = structured.items;
-  const cards = items.map((it, i) => `
-    <article class="item" style="display:block;margin-top:8px">
-      <h3>${esc(it.title || it.topic || ('条目 ' + (i + 1)))}</h3>
-      <p>${esc(it.audience || '')} ${it.purpose ? ' · ' + esc(it.purpose) : ''} ${it.pain ? ' · ' + esc(it.pain) : ''}</p>
-      ${it.body ? `<p>${esc(it.body.slice(0, 180))}${it.body.length > 180 ? '…' : ''}</p>` : ''}
-      <div class="meta">${esc(it.week || '')} ${esc(it.publishAt || '')} · Draft</div>
-    </article>
-  `).join('');
-  const isSchedule = structured.type === 'schedule';
-  return `
-    <div class="actions" style="margin:10px 0">
-      <button class="btn" onclick="saveStructuredToCalendar()">保存至日历</button>
-      ${isSchedule ? `<button class="btn ghost" onclick="fillChat('根据刚才的排期，生成本周3篇内容。'); sendChat()">生成本周3篇</button>` : ''}
-      <button class="btn ghost" onclick="exportStructuredCsv()">导出 Excel</button>
-      <button class="btn ghost" onclick="exportStructuredDoc()">导出 Word</button>
-    </div>
-    ${cards}
-  `;
+  if (structured.type === 'schedule') return renderSchedule(structured);
+  if (structured.type === 'single' || structured.items.length === 1) {
+    return renderPost(structured.items[0]) + resultActions();
+  }
+  return renderPostBatch(structured);
+}
+
+function renderSafeText(text) {
+  const t = cleanVisibleText(text);
+  if (!t || looksLikeJsonDump(t)) {
+    return `<p class="hint">结果整理失败，请重新生成。</p><div class="result-actions"><button class="btn quiet small" onclick="retryLast()">失败重试</button></div>`;
+  }
+  return `<div class="safe-text">${esc(t)}</div>` + resultActions();
 }
 
 function setProgress(text) {
@@ -239,17 +324,23 @@ function setProgress(text) {
 
 function finishBot(bot, payload) {
   bot.streaming = false;
-  bot.text = payload.reply || bot.text || '';
-  bot.sources = payload.sources;
-  bot.dupHint = payload.dupHint;
-  bot.html = renderStructured(payload.structured) + `<div id="streamOut" style="white-space:pre-wrap;margin-top:10px">${esc(bot.text || '')}</div>
-    <div class="actions" style="margin-top:8px">
-      <button class="btn quiet small" onclick="retryLast()">重新生成</button>
-      <button class="btn quiet small" onclick="rewriteField('title')">只重写标题</button>
-      <button class="btn quiet small" onclick="rewriteField('body')">只重写正文</button>
-    </div>`;
-  state.lastStructured = payload.structured;
-  lastResult = bot.text;
+  const structured = payload && payload.structured && payload.structured.items && payload.structured.items.length
+    ? payload.structured
+    : null;
+  const visibleText = cleanVisibleText((payload && payload.reply) || '');
+  if (structured) {
+    bot.html = renderStructured(structured);
+    bot.text = '';
+    state.lastStructured = structured;
+    lastResult = structured.items.map((it) => it.body || it.title).filter(Boolean).join('\n\n');
+  } else {
+    bot.html = renderSafeText(visibleText);
+    bot.text = looksLikeJsonDump(visibleText) ? '' : visibleText;
+    state.lastStructured = null;
+    lastResult = bot.text;
+  }
+  bot.sources = (payload && payload.sources) || [];
+  bot.dupHint = payload && payload.dupHint;
 }
 
 async function sendChat() {
@@ -264,7 +355,7 @@ async function sendChat() {
   chatBusy = true;
   chatAbort = new AbortController();
   state.chatLog.push({ role: 'user', text: message, time: whenFull(new Date().toISOString()) });
-  const bot = { role: 'bot', text: '', time: whenFull(new Date().toISOString()), streaming: true, html: '<div id="streamOut" style="white-space:pre-wrap"></div>' };
+  const bot = { role: 'bot', text: '', time: whenFull(new Date().toISOString()), streaming: true, html: '<div id="streamOut" class="safe-text"></div>' };
   state.chatLog.push(bot);
   draw();
   const started = Date.now();
@@ -284,8 +375,8 @@ async function sendChat() {
     else {
       const msg = (e && e.message) || 'AI服务暂时不可用，请稍后再试。';
       toast(msg, true);
-      bot.text = msg;
-      bot.html = `<div style="white-space:pre-wrap">${esc(msg)}</div><div class="actions" style="margin-top:8px"><button class="btn quiet small" onclick="retryLast()">失败重试</button></div>`;
+      bot.text = '';
+      bot.html = `<p class="hint">${esc(msg)}</p><div class="result-actions"><button class="btn quiet small" onclick="retryLast()">失败重试</button></div>`;
     }
   } finally {
     clearInterval(tick);
@@ -315,7 +406,8 @@ async function runStreamChat(message, bot) {
   const dec = new TextDecoder();
   let buf = '';
   let full = '';
-  let donePayload = null;
+  let structured = null;
+  let gotDone = false;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -325,22 +417,27 @@ async function runStreamChat(message, bot) {
     chunks.forEach((block) => {
       const ev = (block.match(/^event: (.+)$/m) || [])[1];
       const dataLine = (block.match(/^data: ([\s\S]+)$/m) || [])[1];
+      if (!ev || ev === 'ping') return;
       if (!dataLine) return;
       let data = {};
       try { data = JSON.parse(dataLine); } catch (e) { return; }
       if (ev === 'status' && data.text) setProgress(data.text);
       if (ev === 'delta' && data.text) {
-        full += data.text;
-        bot.text = full;
+        const piece = cleanVisibleText(data.text);
+        if (!piece || looksLikeJsonDump(piece)) return;
+        full += piece;
         const out = document.getElementById('streamOut');
-        if (out) out.textContent = full.replace(/<<<JSON[\s\S]*$/, '');
+        if (out) out.textContent = cleanVisibleText(full);
       }
+      if (ev === 'structured' && data.items) structured = data;
       if (ev === 'error') throw new Error(data.error || '生成失败');
-      if (ev === 'done') donePayload = data;
+      if (ev === 'done') gotDone = true;
     });
   }
-  if (donePayload) finishBot(bot, donePayload);
-  else finishBot(bot, { reply: full.replace(/<<<JSON[\s\S]*$/, ''), structured: null });
+  if (!gotDone && !structured && !cleanVisibleText(full)) {
+    throw new Error('结果整理失败，请重新生成');
+  }
+  finishBot(bot, { reply: full, structured: structured });
   toast('已生成');
 }
 
@@ -365,19 +462,15 @@ async function runBatchJobs(message, bot) {
           parts.push(j);
           if (j.structured) state.lastStructured = j.structured;
         }
-        const extra = j.status === 'done'
-          ? (j.reply || j.preview || '')
-          : (j.title + ' 失败：' + (j.error || '') + ' ');
         const out = document.getElementById('streamOut');
-        if (out) out.textContent = parts.map((p) => p.reply || p.preview).join('\n\n————\n\n');
-        bot.text = (bot.text || '') + '\n\n' + extra;
+        if (out) out.textContent = doneN ? ('已完成 ' + doneN + ' 篇') : '';
       }
     });
     if (items.length && items.every((j) => j.status === 'done' || j.status === 'failed')) break;
     await new Promise((r) => setTimeout(r, 1500));
   }
-  const text = parts.map((p) => p.reply || p.preview).filter(Boolean).join('\n\n————\n\n') || bot.text;
-  finishBot(bot, { reply: text, structured: state.lastStructured });
+  const items = parts.map((p) => (p.structured && p.structured.items && p.structured.items[0]) || { title: p.title, body: cleanVisibleText(p.reply || p.preview || '') }).filter((it) => it.title || it.body);
+  finishBot(bot, { structured: items.length ? { type: 'posts', items: items } : null, reply: items.length ? '' : '结果整理失败，请重新生成' });
   toast('本周任务已结束');
 }
 
@@ -388,17 +481,25 @@ function retryLast() {
   sendChat();
 }
 
+function copyLastBody() {
+  const text = lastResult || '';
+  if (!text) { toast('没有可复制的正文', true); return; }
+  copy(text);
+  toast('已复制正文');
+}
+
 async function rewriteField(field) {
   if (!lastResult) { toast('没有可改写的内容', true); return; }
   try {
     const res = await post('/api/agent/rewrite', { field, instruction: '更自然、更短', current: lastResult });
+    const visible = cleanVisibleText(res.reply);
     state.chatLog.push({
       role: 'bot',
-      text: res.reply,
-      html: `<div style="white-space:pre-wrap">${esc(res.reply || '')}</div>`,
+      text: visible,
+      html: renderSafeText(visible),
       time: whenFull(new Date().toISOString())
     });
-    lastResult = res.reply;
+    lastResult = visible;
     draw();
   } catch (e) { toast(e.message, true); }
 }

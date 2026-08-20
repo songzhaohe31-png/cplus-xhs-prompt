@@ -96,8 +96,40 @@ body { background: var(--bg); color: var(--ink); }
   border-radius: 14px;
   padding: 12px 14px;
   max-width: 100%;
-  white-space: pre-wrap;
+  white-space: normal;
   line-height: 1.65;
+}
+.bubble.user { white-space: pre-wrap; }
+.safe-text { white-space: pre-wrap; margin: 0; }
+.safe-text p { margin: 0 0 8px; }
+.result-card {
+  display: block;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 0 0 12px;
+}
+.result-card h3 { margin: 0 0 6px; font-size: 16px; }
+.result-card p { margin: 0 0 8px; color: var(--text); }
+.result-card .kicker { font-size: 12px; color: var(--accent); margin-bottom: 6px; }
+.result-card .points { color: var(--muted); }
+.result-card .cta, .result-card .tags { font-size: 13px; }
+.field-line { font-size: 13px; margin: 0 0 8px; color: var(--muted); }
+.field-line span { display: block; color: var(--accent); font-size: 12px; margin-bottom: 2px; }
+.result-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+.schedule-table-wrap { overflow-x: auto; max-width: 100%; margin-bottom: 12px; }
+.schedule-table { width: 100%; border-collapse: collapse; min-width: 520px; }
+.schedule-table th, .schedule-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
+.schedule-table th { position: sticky; top: 0; background: #fff; font-size: 12px; color: var(--muted); }
+.schedule-table .col-date { white-space: nowrap; }
+.schedule-table .col-title { word-break: break-word; }
+.schedule-cards { display: none; }
+.post-batch .result-card { margin-bottom: 12px; }
+@media (max-width: 720px) {
+  .schedule-table-wrap { display: none; }
+  .schedule-cards { display: block; }
+  .result-card { margin-bottom: 10px; }
 }
 .bubble.user { background: var(--accent-soft); }
 .bubble.bot { background: #f7f9fc; border: 1px solid var(--line); }
