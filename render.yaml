@@ -28,7 +28,7 @@ services:
       - key: XAI_MAX_OUTPUT_TOKENS
         value: "1800"
       - key: XAI_FIRST_TOKEN_MS
-        value: "45000"
+        value: "90000"
       - key: IMAGE_API_KEY
         sync: false
       - key: DATABASE_URL
