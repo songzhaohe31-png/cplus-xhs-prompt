@@ -91,6 +91,17 @@ body { background: var(--bg); color: var(--ink); }
 }
 .quick { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
 .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ready-bar { height: 10px; background: #e6edf5; border-radius: 99px; overflow: hidden; margin: 8px 0 10px; }
+.ready-bar span { display: block; height: 100%; background: var(--accent); }
+.ready-meta { color: var(--muted); margin: 0 0 16px; }
+.status-list { margin: 0; padding-left: 18px; line-height: 1.9; }
+.step-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 16px; }
+.step-card { border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 14px 12px; text-align: left; }
+.step-card.ok { border-color: var(--accent); color: var(--accent); }
+.dna-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 12px 0; }
+.swatch-row { display: flex; gap: 8px; margin: 8px 0 16px; }
+.swatch { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--line); display: inline-block; }
+button[disabled] { opacity: .45; pointer-events: none; }
 .chat-log { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
 .bubble {
   border-radius: 14px;

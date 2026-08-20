@@ -77,22 +77,21 @@ async function ensurePageData(name) {
   pageAbort = new AbortController();
   const signal = pageAbort.signal;
   try {
-    if (name === 'calendar' || name === 'library' || name === 'generate') {
-      const d = await cachedApi('contents', '/api/contents', signal);
-      state.contents = d.items || [];
-    } else if (name === 'knowledge') {
-      const d = await cachedApi('knowledge', '/api/knowledge', signal);
+    if (name === 'facts' || name === 'knowledge' || name === 'home' || name === 'style' || name === 'rules') {
+      const d = await cachedApi('knowledge', '/api/knowledge', signal).catch(() => ({ items: [] }));
       state.knowledge = d.items || [];
-    } else if (name === 'review') {
-      const [m, s] = await Promise.all([
-        cachedApi('metrics', '/api/metrics', signal),
-        api('/api/suggestions', { signal }).catch(() => ({ items: [] }))
-      ]);
-      state.metrics = m.items || [];
-      state.suggestions = s.items || [];
-    } else if (name === 'history') {
+    }
+    if (name === 'samples' || name === 'history' || name === 'style' || name === 'home') {
       const d = await api('/api/feed', { signal }).catch(() => ({ items: [] }));
       state.feed = d.items || [];
+    }
+    if (name === 'schedule' || name === 'calendar' || name === 'library' || name === 'produce' || name === 'generate' || name === 'reports') {
+      const d = await cachedApi('contents', '/api/contents', signal).catch(() => ({ items: [] }));
+      state.contents = d.items || [];
+    }
+    if (name === 'style' || name === 'rules' || name === 'home') {
+      const d = await api('/api/dna', { signal }).catch(() => null);
+      if (d && d.dna) state.dna = d.dna;
     }
   } catch (e) {
     if (e.name === 'AbortError') return;
@@ -105,6 +104,9 @@ async function bootWorkbench() {
     const b = await api('/api/bootstrap');
     state.me = { mode: b.mode || 'public', serviceAvailable: !!b.serviceAvailable };
     state.workspaceSummary = b.workspaceSummary || {};
+    state.readiness = b.readiness || state.readiness;
+    state.dna = b.dna || state.dna;
+    state.series = b.series || state.series;
     state.authed = true;
     state.agent = {};
     paintChrome();
@@ -123,13 +125,22 @@ draw = function () {
   paintChrome();
   const root = document.getElementById('stage');
   const extra = {
-    chat: viewChat,
-    knowledge: viewKnowledge,
-    calendar: viewCalendar,
-    generate: viewGenerate,
-    review: viewReview,
-    library: viewLibrary,
-    history: viewHistory
+    home: viewHome,
+    facts: viewFacts,
+    samples: viewSamples,
+    style: viewStyle,
+    rules: viewRules,
+    topics: viewTopics,
+    produce: viewProduce,
+    schedule: viewSchedule,
+    reports: viewReports,
+    chat: viewTopics,
+    knowledge: viewFacts,
+    calendar: viewSchedule,
+    generate: viewProduce,
+    review: viewReports,
+    library: viewSchedule,
+    history: viewSamples
   };
   if (extra[page]) {
     showSavebar(false);
@@ -143,8 +154,8 @@ draw = function () {
 
 const _go = go;
 go = async function (name) {
-  const allowed = ['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
-  if (!allowed.includes(name)) name = 'chat';
+  const allowed = FLOW_PAGES.concat(['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate']);
+  if (!allowed.includes(name)) name = 'home';
   await _go(name);
   if (name !== 'chat') {
     await ensurePageData(name);
@@ -156,13 +167,11 @@ const _boot = boot;
 boot = async function () {
   await bootWorkbench();
   await _boot();
-  const allowed = ['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate'];
-  if (!allowed.includes(page)) page = 'chat';
+  const allowed = FLOW_PAGES.concat(['chat', 'calendar', 'review', 'knowledge', 'library', 'history', 'generate']);
+  if (!allowed.includes(page) || page === 'chat') page = 'home';
   draw();
-  if (page !== 'chat') {
-    await ensurePageData(page);
-    draw();
-  }
+  await ensurePageData(page);
+  draw();
 };
 
 function viewChat() {

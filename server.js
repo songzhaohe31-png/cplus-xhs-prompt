@@ -23,7 +23,7 @@ const { attachWorkspace, isBlocked, limited, clientIp } = require('./lib/workspa
 
 const app = express();
 const PORT = process.env.PORT || 3210;
-const ASSET_VER = process.env.ASSET_VER || 'v18';
+const ASSET_VER = process.env.ASSET_VER || 'v19';
 const bootAt = Date.now();
 
 app.use(express.json({ limit: '50mb' }));
@@ -102,7 +102,8 @@ const lists = {
   contents: loadList('contents.json'),
   metrics: loadList('metrics.json'),
   chat: loadList('chat.json'),
-  suggestions: loadList('suggestions.json')
+  suggestions: loadList('suggestions.json'),
+  dna: loadList('dna.json')
 };
 
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');

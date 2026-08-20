@@ -4,36 +4,42 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CPLUS 新媒体运营助手</title>
-  <link rel="stylesheet" href="/css/style.v18.css">
-  <link rel="stylesheet" href="/css/theme.v18.css">
+  <link rel="stylesheet" href="/css/style.v19.css">
+  <link rel="stylesheet" href="/css/theme.v19.css">
 </head>
 <body>
   <div class="app">
     <aside class="side" id="side">
-      <div class="brand" onclick="go('chat')">
-        <img class="logo" src="/img/cplus-mark.v18.png" alt="CPLUS GROUP">
+      <div class="brand" onclick="go('home')">
+        <img class="logo" src="/img/cplus-mark.v19.png" alt="CPLUS GROUP">
         <div class="brand-text">
           <strong>CPLUS</strong>
           <span>新媒体助手</span>
         </div>
       </div>
       <nav class="nav" id="steps">
-        <p class="nav-label">工作</p>
-        <button type="button" data-page="chat" onclick="go('chat')">AI 助理</button>
-        <button type="button" data-page="calendar" onclick="go('calendar')">内容日历</button>
-        <button type="button" data-page="library" onclick="go('library')">内容库</button>
-        <button type="button" data-page="review" onclick="go('review')">数据复盘</button>
+        <p class="nav-label">开始</p>
+        <button type="button" data-page="home" onclick="go('home')">工作台</button>
         <p class="nav-label">资料</p>
-        <button type="button" data-page="knowledge" onclick="go('knowledge')">资料库</button>
-        <button type="button" data-page="history" onclick="go('history')">历史内容</button>
+        <button type="button" data-page="facts" onclick="go('facts')">业务资料</button>
+        <button type="button" data-page="samples" onclick="go('samples')">历史文案与海报</button>
+        <p class="nav-label">AI分析</p>
+        <button type="button" data-page="style" onclick="go('style')">账号风格分析</button>
+        <button type="button" data-page="rules" onclick="go('rules')">已确认风格规则</button>
+        <p class="nav-label">内容制作</p>
+        <button type="button" data-page="topics" onclick="go('topics')">主题规划</button>
+        <button type="button" data-page="produce" onclick="go('produce')">图文生成</button>
+        <button type="button" data-page="schedule" onclick="go('schedule')">内容排期</button>
+        <p class="nav-label">成果</p>
+        <button type="button" data-page="reports" onclick="go('reports')">PDF报告</button>
       </nav>
       <div class="side-foot" id="sideFoot"></div>
     </aside>
     <div class="main">
       <header class="topbar">
         <button type="button" class="menu-btn" onclick="toggleSide()">菜单</button>
-        <div class="brand mobile-brand" onclick="go('chat')">
-          <img class="logo" src="/img/cplus-mark.v18.png" alt="CPLUS">
+        <div class="brand mobile-brand" onclick="go('home')">
+          <img class="logo" src="/img/cplus-mark.v19.png" alt="CPLUS">
           <strong>CPLUS</strong>
         </div>
         <div class="top-actions" id="topActions"></div>
@@ -52,8 +58,9 @@
   <div class="sheet hidden" id="sheet"></div>
   <div id="pdfMount" class="pdf-mount" aria-hidden="true"></div>
 
-  <script src="/js/app.v18.js"></script>
-  <script src="/js/workbench.v18.js"></script>
+  <script src="/js/app.v19.js"></script>
+  <script src="/js/workbench.v19.js"></script>
+  <script src="/js/flow.v19.js"></script>
   <script>boot();</script>
 </body>
 </html>
