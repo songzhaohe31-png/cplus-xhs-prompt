@@ -6,10 +6,14 @@
 
 必填：
 
-- `ADMIN_PASSWORD` 首次管理员密码（只用于创建 Admin，不会出现在页面）
-- `AI_API_KEY` 文本模型密钥
-- `AI_PROVIDER` `openai` 或 `gemini`
-- `AI_MODEL` 如 `gpt-4o-mini` 或 `gemini-2.0-flash`
+- `AI_API_KEY` xAI 密钥，必须是 `xai-` 开头的完整密钥（在 https://console.x.ai 创建，只显示一次）。**不要填团队 UUID。**
+- `AI_PROVIDER` `xai`
+- `AI_API_BASE` `https://api.x.ai/v1`（必须是网址，不能填 ID）
+- `AI_MODEL` `grok-4.6`
+
+可选：
+
+- `ADMIN_PASSWORD` 仅内部账号用，公开站点不需要登录
 
 强烈建议：
 

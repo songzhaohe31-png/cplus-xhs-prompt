@@ -61,11 +61,12 @@ function paintChrome() {
 
 async function bootWorkbench() {
   try {
-    const [me, knowledge, contents, metrics] = await Promise.all([
+    const [me, knowledge, contents, metrics, suggestions] = await Promise.all([
       api('/api/me'),
       api('/api/knowledge'),
       api('/api/contents'),
-      api('/api/metrics')
+      api('/api/metrics'),
+      api('/api/suggestions').catch(() => ({ items: [] }))
     ]);
     state.me = me;
     state.authed = true;
@@ -73,7 +74,7 @@ async function bootWorkbench() {
     state.knowledge = knowledge.items || [];
     state.contents = contents.items || [];
     state.metrics = metrics.items || [];
-    state.suggestions = suggestions.items || [];
+    state.suggestions = (suggestions && suggestions.items) || [];
     paintChrome();
   } catch (e) {
     console.warn(e);
@@ -136,7 +137,7 @@ function viewChat() {
   return `
     <h1>CPLUS新媒体运营助手</h1>
     <p class="lead">输入一句话，快速生成内容排期、小红书文案和海报方案。</p>
-    ${state.me && state.me.serviceAvailable === false ? `<div class="warn">AI服务暂时不可用，请稍后再试。</div>` : ''}
+    ${state.me && (state.me.hint || state.me.serviceAvailable === false) ? `<div class="warn">${esc(state.me.hint || 'AI服务暂时不可用，请稍后再试。')}</div>` : ''}
     <div class="quick">
       ${[
         ['生成未来4周的小红书内容排期，每周3篇，重点推广香港公司注册、银行开户和MSO牌照。', '生成未来4周排期'],
@@ -195,7 +196,7 @@ async function sendChat() {
   const message = val('chatMsg');
   if (!message) { toast('先写一句指令', true); return; }
   if (state.me && state.me.serviceAvailable === false) {
-    toast('AI服务暂时不可用，请稍后再试。', true);
+    toast(state.me.hint || 'AI服务暂时不可用，请稍后再试。', true);
     return;
   }
   chatBusy = true;
@@ -229,8 +230,9 @@ async function sendChat() {
   } catch (e) {
     if (e.name === 'AbortError') toast('已取消');
     else {
-      toast('AI服务暂时不可用，请稍后再试。', true);
-      state.chatLog.push({ role: 'bot', text: 'AI服务暂时不可用，请稍后再试。', time: whenFull(new Date().toISOString()) });
+      const msg = (e && e.message) || 'AI服务暂时不可用，请稍后再试。';
+      toast(msg, true);
+      state.chatLog.push({ role: 'bot', text: msg, time: whenFull(new Date().toISOString()) });
     }
   } finally {
     chatBusy = false;

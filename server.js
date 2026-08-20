@@ -903,12 +903,20 @@ app.listen(PORT, '0.0.0.0', async () => {
   } catch (e) {
     console.error('[db] init failed', e.message);
   }
-  const { resolveAiConfig } = require('./lib/ai');
+  const { resolveAiConfig, probeAi, maskSecret } = require('./lib/ai');
   const cfg = resolveAiConfig({});
   if (!cfg.configured) {
     console.warn('[ai] 未配置密钥。请设置环境变量 XAI_API_KEY 或 AI_API_KEY 后重启。公开页面只会显示服务暂不可用。');
   } else {
-    console.log('[ai] 已配置 provider=' + cfg.provider + ' model=' + cfg.model);
+    console.log('[ai] 已配置 provider=' + cfg.provider + ' model=' + cfg.model + ' base=' + cfg.baseHost + ' keyKind=' + cfg.keyKind + ' key=' + maskSecret(cfg.apiKey) + (cfg.baseInvalid ? ' (已忽略无效的 AI_API_BASE)' : ''));
+    if (!cfg.keyLooksValid) {
+      console.warn('[ai] 密钥格式不正确。xAI 密钥必须以 xai- 开头，团队 UUID 不能当作密钥。');
+    } else {
+      probeAi().then((p) => {
+        if (p.ok) console.log('[ai] probe ok, xAI accepted the key');
+        else console.warn('[ai] probe failed', p.status || p.reason);
+      }).catch((e) => console.warn('[ai] probe error', e.message));
+    }
   }
   console.log(`XHS Content Agent running at http://localhost:${PORT}`);
 });
