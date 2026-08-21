@@ -39,7 +39,7 @@ function viewLearn() {
     <section class="panel drop-zone" id="dropZone">
       <h2>上传资料</h2>
       <p>把文件拖到这里，或点选。可一次选多个：PDF / Word / Excel / 文案 / 海报。系统会自动判断类型。</p>
-      <input id="batchFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.webp">
+      <input id="batchFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.webp,.heic,.heif">
       <div class="field"><label>也可直接粘贴文案或网页文字</label><textarea id="pasteText" rows="4" placeholder="小红书Caption、公众号段落或网址说明"></textarea></div>
       <div class="result-actions">
         <button class="btn" onclick="uploadBatch()">上传并识别</button>
@@ -59,8 +59,8 @@ function viewLearn() {
 
 function parseStatusLabel(k) {
   if (k.status === 'parsing' || k.status === 'uploading') return '正在解析';
-  if (k.status === 'ocr') return '正在OCR';
-  if (k.status === 'failed' || !(k.charCount > 0)) return '识别失败';
+  if (k.status === 'ocr') return '正在识别图片';
+  if (k.status === 'failed') return '识别失败';
   if (k.needsConfirm) return '需要用户确认类型';
   return '识别成功';
 }
@@ -68,7 +68,7 @@ function parseStatusLabel(k) {
 function renderLearnItems(items, feed) {
   const cards = [];
   items.forEach((k) => {
-    const failed = k.status === 'failed' || !(k.charCount > 0) && (k.status === 'ok' || !k.status);
+    const failed = k.status === 'failed';
     cards.push(`<article class="result-card">
       <h3>${esc(k.name)}</h3>
       <p>${esc(k.label || '待识别')} · ${esc(parseStatusLabel(k))}</p>
@@ -167,7 +167,7 @@ async function uploadBatch() {
 }
 
 async function pollKnowledge() {
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 180; i++) {
     const d = await api('/api/knowledge').catch(() => ({ items: [] }));
     state.knowledge = d.items || [];
     draw();
