@@ -53,7 +53,8 @@ function viewLearn() {
       <button class="btn" onclick="runStyleAnalyze()" ${r.canAnalyze ? '' : 'disabled'}>分析CPLUS账号风格</button>
     </div>
     <div id="analyzeProgress" class="progress hidden"></div>
-    ${d.analyzedAt && !r.stale ? renderStyleSummary(d, copy, visual, r) : (r.stale ? `<div class="warn">旧分析已失效，请重新分析。</div>` : '')}
+    ${r.stale ? `<div class="warn">资料已变更，请重新分析后再确认。</div>` : ''}
+    ${d.analyzedAt ? renderStyleSummary(d, copy, visual, r) : ''}
   `;
 }
 
@@ -114,9 +115,11 @@ function renderStyleSummary(d, copy, visual, r) {
     <h2>CPLUS账号风格摘要</h2>
     <p class="hint">标题平均字数 ${esc(copy.titleLen || '-')} · 正文平均 ${esc(copy.avgChars || '-')} 字 · 依据 ${esc(String(copy.n || ev.captions || 0))} 篇历史Caption · 置信度 ${Number(copy.n) >= 5 ? '高' : (Number(copy.n) >= 3 ? '中' : '低')}</p>
     ${visual && visual.insufficient ? `<div class="warn">尚未上传海报，无法分析视觉风格。如需专属海报风格，请至少再上传3张历史海报。</div>` : ''}
+    ${r.facts < 1 ? `<div class="warn">还没有业务资料。风格可以先确认样本规律，但生成正式内容前请上传公司/牌照资料。</div>` : ''}
+    ${r.captions < 3 ? `<div class="warn">历史文案不足3篇，确认后还不能生成正式内容。请再上传几篇小红书文案。</div>` : ''}
     ${rows.map(([lab, val]) => val ? `<div class="field-line"><span>${esc(lab)}</span>${esc(val)}</div>` : '').join('')}
     <div class="result-actions">
-      <button class="btn" onclick="confirmDna()">确认并开始创作</button>
+      <button class="btn" onclick="confirmDna()" ${r.facts < 1 || r.captions < 3 || r.stale ? 'disabled' : ''}>确认并开始创作</button>
       <button class="btn ghost" onclick="runStyleAnalyze()">重新分析</button>
       <button class="btn quiet" onclick="state.advancedOpen=!state.advancedOpen; draw()">${state.advancedOpen ? '收起高级修改' : '高级修改'}</button>
     </div>
@@ -219,22 +222,25 @@ async function delFeed(id) {
 
 async function runStyleAnalyze() {
   const box = document.getElementById('analyzeProgress');
-  const steps = ['正在读取资料', '正在提取业务事实', '正在分析文案结构', '正在分析Hashtag', '正在分析海报版式', '正在整理分析结果'];
+  const steps = ['正在统计历史文案', '正在归纳标题和Hashtag', '正在整理风格摘要'];
   if (box) { box.classList.remove('hidden'); box.textContent = steps[0]; }
   let i = 0;
   const t = setInterval(() => {
     i = Math.min(i + 1, steps.length - 1);
     if (box) box.textContent = steps[i];
-  }, 2500);
-  busy(true, '正在分析');
+  }, 1200);
+  busy(true, '正在分析风格');
   try {
     const res = await post('/api/dna/analyze', {});
     state.dna = res.dna;
     state.readiness = res.readiness || state.readiness;
     draw();
-    toast('分析完成，请确认后开始创作');
-  } catch (e) { toast(e.message, true); }
-  finally { clearInterval(t); busy(false); }
+    const r = state.readiness || {};
+    if (r.facts < 1) toast('文案风格已分析。生成正式内容前请再上传业务资料');
+    else if (r.captions < 3) toast('风格已分析。请再补历史文案到3篇后再确认');
+    else toast('分析完成，请确认后开始创作');
+  } catch (e) { toast(e.message || '风格分析失败，请稍后重试', true); }
+  finally { clearInterval(t); busy(false); if (box) box.classList.add('hidden'); }
 }
 
 async function saveDnaFields() {
@@ -250,11 +256,13 @@ async function saveDnaFields() {
 
 async function confirmDna() {
   if (state.advancedOpen) await saveDnaFields();
-  const res = await post('/api/dna/confirm', {});
-  state.dna = res.dna;
-  state.readiness = res.readiness || state.readiness;
-  toast('已确认，可以开始创作');
-  go('studio');
+  try {
+    const res = await post('/api/dna/confirm', {});
+    state.dna = res.dna;
+    state.readiness = res.readiness || state.readiness;
+    toast('已确认，可以开始创作');
+    go('studio');
+  } catch (e) { toast(e.message || '还不能确认', true); }
 }
 
 function viewStudio() {
